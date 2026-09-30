@@ -12,7 +12,8 @@ Strict rules:
    - Terms under "Do not translate" MUST be kept verbatim in their original form.
    - Terms under "Translate as" MUST use the exact specified translation.
 5. Do NOT add any comments, notes, conversational text, pleasantries, or markdown wrappers like ```markdown ... ``` around your entire answer.
-6. Output ONLY the translated Markdown text."""
+6. Translate ONLY the document content under "### Text to Translate to {target_language}:". Never repeat, translate, or include prompt section headers such as "### Glossary Rules" or "### Text to Translate" in your output.
+7. Output ONLY the translated Markdown text."""
 
 
 def get_system_prompt(target_language: str = "pt-BR") -> str:

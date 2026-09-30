@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from tradutor_pdf.config import GlossaryConfig, load_glossary
 from tradutor_pdf.pipeline import Chunk, Translator
@@ -22,6 +23,19 @@ from tradutor_pdf.translation.validator import (
 )
 
 logger = logging.getLogger(__name__)
+
+_ECHOED_PREAMBLE_RE = re.compile(
+    r"^(?:[#\s]*(?:Glossary|Glossário|Previous Context|Contexto Anterior)[^\n]*\n(?:.*?\n)*?)?"
+    r"[#\s]*(?:Text to Translate|Texto a Traduzir|Texto para Traduzir)[^\n]*\n+",
+    re.IGNORECASE,
+)
+
+
+def strip_echoed_preamble(text: str) -> str:
+    """Remove any prompt section headers (e.g. ### Glossary Rules, ### Text to Translate) echoed by the LLM."""
+    if not text:
+        return text
+    return _ECHOED_PREAMBLE_RE.sub("", text).strip()
 
 
 def strip_code_fence_wrapper(text: str) -> str:
@@ -132,7 +146,7 @@ class OllamaTranslator(Translator):
                     system=system_prompt,
                     temperature=self.temperature,
                 )
-                cleaned = strip_code_fence_wrapper(response)
+                cleaned = strip_echoed_preamble(strip_code_fence_wrapper(response))
                 validation = self.validator.validate(
                     raw_response=cleaned,
                     original_text=protected_text,

@@ -20,6 +20,13 @@ _PAGE_NUMBER_PATTERNS = [
 ]
 
 
+# Patterns for chapter and section headings that should not be dropped as running headers
+_HEADING_EXEMPT_PATTERN = re.compile(
+    r"^\s*(?:chapter|capítulo|section|seção|part|parte)\b",
+    re.IGNORECASE,
+)
+
+
 def is_standalone_page_number(text: str) -> bool:
     """Return True if text is purely a page number representation."""
     cleaned = text.strip()
@@ -76,7 +83,11 @@ def remove_repeated_headers_footers(blocks: Sequence[Block]) -> list[Block]:
 
         first_b = text_blocks[0]
         first_clean = first_b.content.strip()
-        if len(first_clean) < 120 and "\n" not in first_clean:
+        if (
+            len(first_clean) < 120
+            and "\n" not in first_clean
+            and not _HEADING_EXEMPT_PATTERN.match(first_clean)
+        ):
             norm_header = re.sub(r"\d+", "#", first_clean.lower())
             header_counts[norm_header] += 1
 
