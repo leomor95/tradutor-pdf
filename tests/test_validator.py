@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from tradutor_pdf.translation.validator import (
     TranslationValidator,
+    demote_extra_headings,
     validate_translation,
 )
 
@@ -91,3 +92,59 @@ def test_validator_rejects_length_too_long() -> None:
     result = validator.validate(resp, orig)
     assert not result.is_valid
     assert any("longo" in r.lower() for r in result.reasons)
+
+
+def test_validator_tolerates_one_extra_heading_and_list_item() -> None:
+    # Real case: the model promoted a title line to a heading and repaired a list
+    # item whose bullet was lost during extraction.
+    orig = (
+        "LIMITED EDITION\n\n# THE BOOK\n\n# WARNING\n\n"
+        "- . Trigger trauma\n\n- . Create harm\n\n. Result in injury"
+    )
+    resp = (
+        "### Edição Limitada\n\n# O LIVRO\n\n# AVISO\n\n"
+        "- Desencadear traumas\n\n- Criar danos\n\n- Resultar em lesões"
+    )
+
+    result = validate_translation(resp, orig)
+    assert result.is_valid, result.reasons
+
+
+def test_validator_rejects_too_many_extra_headings() -> None:
+    orig = "# Title\n\nParagraph one.\n\nParagraph two.\n\nParagraph three."
+    resp = "# Título\n\n## Parágrafo um.\n\n## Parágrafo dois.\n\n## Parágrafo três."
+
+    result = validate_translation(resp, orig)
+    assert not result.is_valid
+    assert any("título" in r.lower() for r in result.reasons)
+
+
+def test_validator_extra_tolerance_scales_with_original_count() -> None:
+    validator = TranslationValidator()
+    assert validator.max_extra_items(0) == 1
+    assert validator.max_extra_items(8) == 1
+    assert validator.max_extra_items(30) == 3
+
+
+def test_demote_extra_headings_removes_invented_heading() -> None:
+    orig = "LIMITED EDITION\n\n# THE BOOK\n\nText.\n\n# WARNING\n\nMore text."
+    resp = "### Edição Limitada\n\n# O LIVRO\n\nTexto.\n\n# AVISO\n\nMais texto."
+
+    result = demote_extra_headings(resp, orig)
+    assert result == "Edição Limitada\n\n# O LIVRO\n\nTexto.\n\n# AVISO\n\nMais texto."
+
+
+def test_demote_extra_headings_same_level_uses_position() -> None:
+    orig = "# First\n\nBody one.\n\nMiddle line.\n\n# Last\n\nBody two."
+    resp = "# Primeiro\n\nCorpo um.\n\n# Linha do meio.\n\n# Último\n\nCorpo dois."
+
+    result = demote_extra_headings(resp, orig)
+    assert (
+        result == "# Primeiro\n\nCorpo um.\n\nLinha do meio.\n\n# Último\n\nCorpo dois."
+    )
+
+
+def test_demote_extra_headings_keeps_matching_structure() -> None:
+    orig = "# A\n\n## B\n\nText."
+    resp = "# A traduzido\n\n## B traduzido\n\nTexto."
+    assert demote_extra_headings(resp, orig) == resp

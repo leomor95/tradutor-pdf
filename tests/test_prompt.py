@@ -67,3 +67,18 @@ def test_build_translation_prompt_truncates_long_context() -> None:
     )
     assert "...AAAA" in prompt
     assert "...BBBB" in prompt
+
+
+def test_build_prompt_without_retry_feedback_has_no_correction_section() -> None:
+    prompt = build_translation_prompt(text="Hello")
+    assert "Correction Required" not in prompt
+
+
+def test_build_prompt_with_retry_feedback() -> None:
+    reasons = ("Quantidade de títulos diverge: original tem 8, tradução tem 10",)
+    prompt = build_translation_prompt(text="# Hello", retry_feedback=reasons)
+
+    assert "### Correction Required" in prompt
+    assert "- Quantidade de títulos diverge: original tem 8, tradução tem 10" in prompt
+    # Feedback must come before the text so the model reads it as an instruction
+    assert prompt.index("Correction Required") < prompt.index("### Text to Translate")

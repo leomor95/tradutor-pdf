@@ -20,12 +20,18 @@ from tradutor_pdf.translation.prompt import (
 )
 from tradutor_pdf.translation.validator import (
     TranslationValidator,
+    demote_extra_headings,
 )
 
 logger = logging.getLogger(__name__)
 
+# Temperature added per retry so a rejected answer is not reproduced verbatim.
+RETRY_TEMPERATURE_STEP = 0.2
+MAX_RETRY_TEMPERATURE = 0.8
+
 _ECHOED_PREAMBLE_RE = re.compile(
-    r"^(?:[#\s]*(?:Glossary|Glossário|Previous Context|Contexto Anterior)[^\n]*\n(?:.*?\n)*?)?"
+    r"^(?:[#\s]*(?:Glossary|Glossário|Previous Context|Contexto Anterior|Correction Required)"
+    r"[^\n]*\n(?:.*?\n)*?)?"
     r"[#\s]*(?:Text to Translate|Texto a Traduzir|Texto para Traduzir)[^\n]*\n+",
     re.IGNORECASE,
 )
@@ -116,20 +122,31 @@ class OllamaTranslator(Translator):
 
         protected_text, placeholders = protect_placeholders(chunk.original_text)
 
-        prompt = build_translation_prompt(
-            text=protected_text,
-            target_language=self.target_language,
-            glossary_preserve=app_preserve,
-            glossary_translations=app_trans,
-            previous_original=prev_orig,
-            previous_translation=prev_trans,
-        )
-
         system_prompt = get_system_prompt(self.target_language)
 
         last_error: str | None = None
+        retry_feedback: tuple[str, ...] | None = None
 
         for attempt in range(1, self.max_retries + 1):
+            prompt = build_translation_prompt(
+                text=protected_text,
+                target_language=self.target_language,
+                glossary_preserve=app_preserve,
+                glossary_translations=app_trans,
+                previous_original=prev_orig,
+                previous_translation=prev_trans,
+                retry_feedback=retry_feedback,
+            )
+            temperature = self.temperature
+            if attempt > 1:
+                temperature = max(
+                    self.temperature,
+                    min(
+                        self.temperature + RETRY_TEMPERATURE_STEP * (attempt - 1),
+                        MAX_RETRY_TEMPERATURE,
+                    ),
+                )
+
             logger.info(
                 "Translating chunk %s (attempt %d/%d, %d tokens) with model %s",
                 chunk.id,
@@ -144,7 +161,7 @@ class OllamaTranslator(Translator):
                     prompt=prompt,
                     model=self.model,
                     system=system_prompt,
-                    temperature=self.temperature,
+                    temperature=temperature,
                 )
                 cleaned = strip_echoed_preamble(strip_code_fence_wrapper(response))
                 validation = self.validator.validate(
@@ -162,8 +179,10 @@ class OllamaTranslator(Translator):
                         reasons_str,
                     )
                     last_error = f"Validation failed: {reasons_str}"
+                    retry_feedback = validation.reasons
                     continue
 
+                cleaned = demote_extra_headings(cleaned, protected_text)
                 restored = restore_placeholders(cleaned, placeholders)
                 corrected = verify_and_correct_translation(
                     restored, chunk.original_text, self.glossary

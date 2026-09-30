@@ -39,6 +39,7 @@ CHAT_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 HEADING_PATTERN = re.compile(r"^#{1,6}\s+", re.MULTILINE)
+HEADING_LINE_PATTERN = re.compile(r"^(#{1,6})\s+(.*)$", re.MULTILINE)
 LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+", re.MULTILINE)
 PLACEHOLDER_PATTERN = re.compile(r"(?:__\s*PH_\d+\s*__|§§[A-Z0-9_]+§§)", re.IGNORECASE)
 
@@ -66,9 +67,30 @@ class TranslationValidator:
         self,
         min_length_ratio: float = 0.4,
         max_length_ratio: float = 2.5,
+        extra_structure_ratio: float = 0.1,
     ) -> None:
         self.min_length_ratio = min_length_ratio
         self.max_length_ratio = max_length_ratio
+        self.extra_structure_ratio = extra_structure_ratio
+
+    def max_extra_items(self, original_count: int) -> int:
+        """Number of extra headings/list items tolerated over the original count.
+
+        LLMs often repair malformed source structure (e.g. an orphan list item whose
+        bullet was lost during extraction, or a standalone title line promoted to a
+        heading). Such additions are harmless in small numbers; losing items is not.
+        """
+        return max(1, int(original_count * self.extra_structure_ratio))
+
+    def _check_count(self, label: str, orig_count: int, resp_count: int) -> str | None:
+        if resp_count < orig_count or resp_count - orig_count > self.max_extra_items(
+            orig_count
+        ):
+            return (
+                f"Quantidade de {label} diverge: original tem {orig_count}, "
+                f"tradução tem {resp_count}"
+            )
+        return None
 
     def validate(
         self,
@@ -117,23 +139,23 @@ class TranslationValidator:
                     f"encontrado {resp_phs}"
                 )
 
-        # 4. Validate heading count
-        orig_headings = HEADING_PATTERN.findall(original_text)
-        resp_headings = HEADING_PATTERN.findall(cleaned)
-        if len(orig_headings) != len(resp_headings):
-            reasons.append(
-                f"Quantidade de títulos diverge: original tem {len(orig_headings)}, "
-                f"tradução tem {len(resp_headings)}"
-            )
+        # 4. Validate heading count (losing headings is an error; a few extras are tolerated)
+        heading_error = self._check_count(
+            "títulos",
+            len(HEADING_PATTERN.findall(original_text)),
+            len(HEADING_PATTERN.findall(cleaned)),
+        )
+        if heading_error:
+            reasons.append(heading_error)
 
-        # 5. Validate list item count
-        orig_lists = LIST_ITEM_PATTERN.findall(original_text)
-        resp_lists = LIST_ITEM_PATTERN.findall(cleaned)
-        if len(orig_lists) != len(resp_lists):
-            reasons.append(
-                f"Quantidade de itens de lista diverge: original tem {len(orig_lists)}, "
-                f"tradução tem {len(resp_lists)}"
-            )
+        # 5. Validate list item count (same tolerance as headings)
+        list_error = self._check_count(
+            "itens de lista",
+            len(LIST_ITEM_PATTERN.findall(original_text)),
+            len(LIST_ITEM_PATTERN.findall(cleaned)),
+        )
+        if list_error:
+            reasons.append(list_error)
 
         # 6. Validate length within expected range
         orig_len = len(original_text.strip())
@@ -158,6 +180,67 @@ class TranslationValidator:
         if reasons:
             return ValidationResult.reject(*reasons)
         return ValidationResult.ok()
+
+
+def demote_extra_headings(translation: str, original_text: str) -> str:
+    """Turn headings the model invented back into plain paragraphs.
+
+    Original headings are aligned in order to the translated ones, minimising the
+    difference in heading level and relative position in the text. Translated headings
+    left unmatched are extra and have their '#' markers removed.
+    """
+    orig = [
+        (len(m.group(1)), m.start() / max(len(original_text), 1))
+        for m in HEADING_LINE_PATTERN.finditer(original_text)
+    ]
+    resp_matches = list(HEADING_LINE_PATTERN.finditer(translation))
+    n, m = len(resp_matches), len(orig)
+    if n <= m:
+        return translation
+
+    resp = [
+        (len(match.group(1)), match.start() / max(len(translation), 1))
+        for match in resp_matches
+    ]
+
+    def cost(i: int, j: int) -> float:
+        level_penalty = 0.0 if resp[i][0] == orig[j][0] else 1.0
+        return level_penalty + abs(resp[i][1] - orig[j][1])
+
+    # best[i][j]: minimal cost of matching the first j original headings
+    # within the first i translated headings.
+    inf = float("inf")
+    best = [[inf] * (m + 1) for _ in range(n + 1)]
+    for i in range(n + 1):
+        best[i][0] = 0.0
+    for i in range(1, n + 1):
+        for j in range(1, min(i, m) + 1):
+            best[i][j] = min(
+                best[i - 1][j],
+                best[i - 1][j - 1] + cost(i - 1, j - 1),
+            )
+
+    extra: set[int] = set()
+    i, j = n, m
+    while i > 0:
+        if j > 0 and best[i][j] == best[i - 1][j - 1] + cost(i - 1, j - 1):
+            j -= 1
+        else:
+            extra.add(i - 1)
+        i -= 1
+
+    parts: list[str] = []
+    last = 0
+    for idx, match in enumerate(resp_matches):
+        if idx in extra:
+            logger.info(
+                "Demoting extra heading not present in original: %r", match.group(0)
+            )
+            parts.append(translation[last : match.start()])
+            parts.append(match.group(2))
+            last = match.end()
+    parts.append(translation[last:])
+    return "".join(parts)
 
 
 def validate_translation(

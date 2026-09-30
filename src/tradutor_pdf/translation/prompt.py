@@ -28,8 +28,13 @@ def build_translation_prompt(
     glossary_translations: dict[str, str] | None = None,
     previous_original: str | None = None,
     previous_translation: str | None = None,
+    retry_feedback: list[str] | tuple[str, ...] | None = None,
 ) -> str:
-    """Build the structured user prompt with context and glossary instructions."""
+    """Build the structured user prompt with context and glossary instructions.
+
+    ``retry_feedback`` lists why the previous attempt was rejected, so a retry does
+    not resend an identical prompt and get an identical rejected answer.
+    """
     sections: list[str] = []
 
     # 1. Previous context for terminology consistency
@@ -63,7 +68,20 @@ def build_translation_prompt(
     if glossary_lines:
         sections.append("### Glossary Rules:\n" + "\n".join(glossary_lines))
 
-    # 3. Main content to translate
+    # 3. Rejection reasons from the previous attempt
+    if retry_feedback:
+        feedback_lines = [
+            "### Correction Required (your previous translation was rejected):",
+            *(f"- {reason}" for reason in retry_feedback),
+            (
+                "Keep exactly the same Markdown structure as the source text: the same "
+                "headings (lines starting with #) and the same list items. Do not turn "
+                "plain lines into headings and do not add or remove list items."
+            ),
+        ]
+        sections.append("\n".join(feedback_lines))
+
+    # 4. Main content to translate
     sections.append(f"### Text to Translate to {target_language}:\n{text}")
 
     return "\n\n".join(sections)

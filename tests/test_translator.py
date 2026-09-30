@@ -191,3 +191,40 @@ def test_translate_reset_context(fake_llm):
 
     second_prompt = fake_llm.calls[1]["prompt"]
     assert "### Previous Context" not in second_prompt
+
+
+def test_translate_retry_sends_feedback_and_raises_temperature(fake_llm):
+    # Attempt 1 drops the only heading (rejected); attempt 2 is valid
+    fake_llm.queue_responses(
+        "Introdução\n\nTexto traduzido.",
+        "# Introdução\n\nTexto traduzido.",
+    )
+    translator = OllamaTranslator(client=fake_llm, max_retries=3, temperature=0.2)
+    chunk = Chunk(id="c_feedback", original_text="# Introduction\n\nTranslated text.")
+
+    res = translator.translate(chunk)
+    assert res == "# Introdução\n\nTexto traduzido."
+    assert len(fake_llm.calls) == 2
+
+    first, second = fake_llm.calls
+    assert "Correction Required" not in first["prompt"]
+    assert "Correction Required" in second["prompt"]
+    assert "Quantidade de títulos diverge" in second["prompt"]
+    assert first["temperature"] == 0.2
+    assert second["temperature"] > first["temperature"]
+
+
+def test_translate_demotes_invented_heading(fake_llm):
+    fake_llm.set_response(
+        "### Edição Limitada\n\n# O Livro\n\nTexto.\n\n# Aviso\n\nMais texto."
+    )
+    translator = OllamaTranslator(client=fake_llm)
+    chunk = Chunk(
+        id="c_demote",
+        original_text="LIMITED EDITION\n\n# The Book\n\nText.\n\n# Warning\n\nMore text.",
+    )
+
+    res = translator.translate(chunk)
+    assert chunk.status == "translated"
+    assert res == "Edição Limitada\n\n# O Livro\n\nTexto.\n\n# Aviso\n\nMais texto."
+    assert len(fake_llm.calls) == 1
