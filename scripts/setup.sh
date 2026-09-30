@@ -82,12 +82,17 @@ echo "[OK] uv encontrado: $(uv --version)"
 
 echo "=== [2/6] Sincronizando dependências Python com uv ==="
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$ROOT_DIR/.cache/uv}"
-mkdir -p "$UV_CACHE_DIR"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$ROOT_DIR/.cache}"
+export HF_HOME="${HF_HOME:-$ROOT_DIR/.cache/hf}"
+export TMPDIR="${TMPDIR:-$ROOT_DIR/.cache/tmp}"
+export TEMP="${TEMP:-$ROOT_DIR/.cache/tmp}"
+export TMP="${TMP:-$ROOT_DIR/.cache/tmp}"
+mkdir -p "$UV_CACHE_DIR" "$XDG_CACHE_HOME" "$HF_HOME" "$TMPDIR"
 (cd "$ROOT_DIR" && uv sync)
 echo "[OK] Ambiente Python sincronizado em .venv/"
 
 echo "=== [3/6] Verificando binário do Ollama ==="
-mkdir -p "$ROOT_DIR/bin" "$ROOT_DIR/logs" "$ROOT_DIR/models" "$ROOT_DIR/.cache"
+mkdir -p "$ROOT_DIR/bin" "$ROOT_DIR/logs" "$ROOT_DIR/models" "$ROOT_DIR/.cache" "$ROOT_DIR/.cache/tmp"
 
 if [ -x "$ROOT_DIR/bin/ollama" ]; then
     echo "[OK] Ollama já instalado: $("$ROOT_DIR/bin/ollama" --version 2>&1 || echo 'bin/ollama')"
@@ -175,7 +180,7 @@ export OLLAMA_HOST="127.0.0.1:11434"
 OLLAMA_STARTED_BY_SCRIPT=false
 if ! curl -s "http://$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
     echo "[INFO] Iniciando Ollama local para verificação..."
-    "$ROOT_DIR/bin/ollama" serve > "$ROOT_DIR/logs/ollama_setup.log" 2>&1 &
+    HOME="$ROOT_DIR/.cache" "$ROOT_DIR/bin/ollama" serve > "$ROOT_DIR/logs/ollama_setup.log" 2>&1 &
     OLLAMA_PID=$!
     OLLAMA_STARTED_BY_SCRIPT=true
 
@@ -209,7 +214,7 @@ if curl -s "http://$OLLAMA_HOST/api/tags" | grep -q "\"$MODEL\""; then
     echo "[OK] Modelo '$MODEL' já está presente em models/."
 else
     echo "[INFO] Baixando modelo '$MODEL' (armazenado em models/)..."
-    "$ROOT_DIR/bin/ollama" pull "$MODEL"
+    HOME="$ROOT_DIR/.cache" "$ROOT_DIR/bin/ollama" pull "$MODEL"
     echo "[OK] Modelo '$MODEL' baixado com sucesso."
 fi
 

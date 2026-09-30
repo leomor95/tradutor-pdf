@@ -10,6 +10,9 @@ export OLLAMA_HOST="127.0.0.1:11434"
 export XDG_CACHE_HOME="$ROOT_DIR/.cache"
 export HF_HOME="$ROOT_DIR/.cache/hf"
 export UV_CACHE_DIR="$ROOT_DIR/.cache/uv"
+export TMPDIR="$ROOT_DIR/.cache/tmp"
+export TEMP="$ROOT_DIR/.cache/tmp"
+export TMP="$ROOT_DIR/.cache/tmp"
 
 if [ -d "$ROOT_DIR/bin/tessdata" ]; then
     export TESSDATA_PREFIX="${TESSDATA_PREFIX:-$ROOT_DIR/bin/tessdata}"
@@ -21,7 +24,7 @@ elif [ -d "$ROOT_DIR/bin" ]; then
     export PATH="$ROOT_DIR/bin:$PATH"
 fi
 
-mkdir -p "$OLLAMA_MODELS" "$XDG_CACHE_HOME" "$HF_HOME" "$UV_CACHE_DIR" "$ROOT_DIR/logs"
+mkdir -p "$OLLAMA_MODELS" "$XDG_CACHE_HOME" "$HF_HOME" "$UV_CACHE_DIR" "$TMPDIR" "$ROOT_DIR/logs"
 
 # Start Ollama local server if not already running
 if ! curl -s "http://$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
@@ -30,7 +33,7 @@ if ! curl -s "http://$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
         echo "[ERRO] Binário do Ollama não encontrado em bin/ollama. Execute scripts/setup.sh primeiro." >&2
         exit 1
     fi
-    nohup "$ROOT_DIR/bin/ollama" serve > "$ROOT_DIR/logs/ollama.log" 2>&1 &
+    HOME="$ROOT_DIR/.cache" nohup "$ROOT_DIR/bin/ollama" serve > "$ROOT_DIR/logs/ollama.log" 2>&1 &
     disown || true
     
     TRIES=0

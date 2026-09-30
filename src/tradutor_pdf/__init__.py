@@ -4,13 +4,23 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure isolated cache and model directories (RNF24)
+# Ensure isolated cache, temporary and model directories (RNF24)
 _root_dir = Path(__file__).resolve().parent.parent.parent
 os.environ.setdefault("XDG_CACHE_HOME", str(_root_dir / ".cache"))
 os.environ.setdefault("HF_HOME", str(_root_dir / ".cache" / "hf"))
 os.environ.setdefault("UV_CACHE_DIR", str(_root_dir / ".cache" / "uv"))
 os.environ.setdefault("OLLAMA_MODELS", str(_root_dir / "models"))
 os.environ.setdefault("OLLAMA_HOST", "127.0.0.1:11434")
+
+_tmp_dir = _root_dir / ".cache" / "tmp"
+_tmp_dir.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("TMPDIR", str(_tmp_dir))
+os.environ.setdefault("TEMP", str(_tmp_dir))
+os.environ.setdefault("TMP", str(_tmp_dir))
+
+import tempfile
+
+tempfile.tempdir = str(_tmp_dir)
 
 from tradutor_pdf.assembly.markdown import (
     MarkdownAssembler,
