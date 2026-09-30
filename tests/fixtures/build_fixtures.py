@@ -11,6 +11,7 @@ FIXTURE_NAMES = [
     "code_blocks",
     "footnotes",
     "two_columns",
+    "technical_en",
 ]
 
 
