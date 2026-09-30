@@ -101,6 +101,9 @@ def test_ollama_client_detect_device_cpu() -> None:
 @pytest.mark.slow
 def test_real_ollama_connection() -> None:
     client = OllamaClient()
-    assert client.health_check() is True
+    if not client.health_check():
+        pytest.skip(
+            "Ollama is not running. Start with ./scripts/run.sh --check before running slow tests."
+        )
     resp = client.generate("Responda apenas 'OK'.")
     assert "OK" in resp.upper()
