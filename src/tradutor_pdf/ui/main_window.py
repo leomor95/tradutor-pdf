@@ -29,6 +29,7 @@ from tradutor_pdf.config import load_settings
 from tradutor_pdf.export.converter import DocumentConverter
 from tradutor_pdf.translation.ollama_client import check_service_health
 from tradutor_pdf.translation.prompt import PROMPT_VERSION
+from tradutor_pdf.ui.errors import classify_error
 from tradutor_pdf.ui.utils import format_eta
 from tradutor_pdf.ui.worker import TranslationWorker
 
@@ -108,7 +109,7 @@ class DropArea(QFrame):
         urls = event.mimeData().urls()
         if len(urls) == 1:
             file_path = Path(urls[0].toLocalFile())
-            if file_path.is_file() and file_path.suffix.lower() == ".pdf":
+            if file_path.is_file():
                 event.acceptProposedAction()
                 self.file_dropped.emit(file_path)
                 return
@@ -121,7 +122,7 @@ class DropArea(QFrame):
             self,
             "Selecionar documento PDF",
             "",
-            "Arquivos PDF (*.pdf)",
+            "Arquivos PDF (*.pdf);;Todos os arquivos (*)",
         )
         if file_path_str:
             path = Path(file_path_str)
@@ -213,10 +214,13 @@ class ExportDialog(QDialog):
         )
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
+            # Test write permissions
+            test_file = target_dir / f".write_check_{id(self)}.tmp"
+            test_file.touch()
+            test_file.unlink(missing_ok=True)
         except OSError as exc:
-            QMessageBox.critical(
-                self, "Erro", f"Não foi possível criar a pasta de destino:\n{exc}"
-            )
+            formatted = classify_error(exc)
+            QMessageBox.critical(self, formatted.title, formatted.to_user_message())
             return
 
         fmt = "pdf"
@@ -233,11 +237,10 @@ class ExportDialog(QDialog):
                 destination=target_dir,
             )
             self.accept()
-        except (RuntimeError, ValueError, OSError) as exc:
+        except Exception as exc:
             logger.exception("Export failed")
-            QMessageBox.critical(
-                self, "Erro na Exportação", f"Falha ao exportar documento:\n{exc}"
-            )
+            formatted = classify_error(exc)
+            QMessageBox.critical(self, formatted.title, formatted.to_user_message())
 
 
 class ConversionDialog(QDialog):
@@ -342,7 +345,15 @@ class ConversionDialog(QDialog):
 
         dest_dir_str = self.dest_edit.text().strip()
         target_dir = Path(dest_dir_str).expanduser() if dest_dir_str else source.parent
-        target_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            test_file = target_dir / f".write_check_{id(self)}.tmp"
+            test_file.touch()
+            test_file.unlink(missing_ok=True)
+        except OSError as exc:
+            formatted = classify_error(exc)
+            QMessageBox.critical(self, formatted.title, formatted.to_user_message())
+            return
 
         selected_text = self.combo_format.currentText()
         if "PDF" in selected_text:
@@ -360,11 +371,10 @@ class ConversionDialog(QDialog):
                 destination=target_dir,
             )
             self.accept()
-        except (RuntimeError, ValueError, OSError) as exc:
+        except Exception as exc:
             logger.exception("Conversion failed")
-            QMessageBox.critical(
-                self, "Erro na Conversão", f"Falha ao converter arquivo:\n{exc}"
-            )
+            formatted = classify_error(exc)
+            QMessageBox.critical(self, formatted.title, formatted.to_user_message())
 
 
 class MainWindow(QMainWindow):
@@ -721,6 +731,11 @@ class MainWindow(QMainWindow):
             self.btn_resume.setVisible(True)
             self.btn_resume.setEnabled(True)
         self.eta_label.setText("")
-        self.status_label.setStyleSheet("color: #d32f2f; font-size: 13px;")
-        self.status_label.setText(f"Erro na tradução: {error_message}")
+        formatted = classify_error(error_message)
+        self.status_label.setStyleSheet(
+            "color: #d32f2f; font-size: 13px; font-weight: bold;"
+        )
+        self.status_label.setText(
+            f"Erro na tradução ({formatted.title}): {formatted.message}\n\nAção sugerida: {formatted.action}"
+        )
         self.current_worker = None

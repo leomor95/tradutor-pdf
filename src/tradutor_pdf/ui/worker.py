@@ -21,6 +21,7 @@ from tradutor_pdf.pipeline import Assembler, Chunk, Extractor, Segmenter, Transl
 from tradutor_pdf.segmentation.semantic import SemanticSegmenter
 from tradutor_pdf.translation.prompt import PROMPT_VERSION
 from tradutor_pdf.translation.translator import OllamaTranslator
+from tradutor_pdf.ui.errors import validate_pdf_file
 from tradutor_pdf.ui.utils import MovingAverageEstimator
 
 logger = logging.getLogger(__name__)
@@ -75,11 +76,7 @@ class TranslationWorker(QThread):
 
     def run(self) -> None:
         try:
-            if not self.source_path.is_file():
-                raise FileNotFoundError(
-                    f"Arquivo PDF não encontrado: {self.source_path}"
-                )
-
+            validate_pdf_file(self.source_path)
             total_pages = get_pdf_page_count(self.source_path)
 
             # Checkpoint conflict handling

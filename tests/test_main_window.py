@@ -257,7 +257,10 @@ def test_main_window_cancel_and_resume(qtbot, tmp_path: Path):
     assert not window.btn_cancel.isHidden()
     assert window.btn_resume.isHidden()
 
-    qtbot.waitUntil(lambda: window.progress_bar.value() == 100, timeout=10000)
+    qtbot.waitUntil(
+        lambda: window.btn_cancel.isHidden() and window.progress_bar.value() == 100,
+        timeout=10000,
+    )
     assert window.btn_cancel.isHidden()
     assert window.btn_resume.isHidden()
     if window.current_worker:
