@@ -5,8 +5,13 @@ import pytest
 from tradutor_pdf.config import (
     ConfigError,
     Settings,
+    find_project_root,
+    get_default_destination,
+    get_last_destination,
+    get_user_state_path,
     load_glossary,
     load_settings,
+    save_last_destination,
 )
 
 
@@ -71,3 +76,45 @@ def test_invalid_glossary_structure(tmp_path: Path) -> None:
     bad_yaml.write_text("preservar: 12345", encoding="utf-8")
     with pytest.raises(ConfigError, match="Field 'preservar'"):
         load_glossary(bad_yaml)
+
+
+def test_user_state_path_location() -> None:
+    path = get_user_state_path()
+    root = find_project_root()
+    assert str(path).startswith(str(root / "config"))
+    assert path.name == "state.json"
+    assert "~/.config" not in str(path)
+
+
+def test_get_last_destination_empty(tmp_path: Path) -> None:
+    state_file = tmp_path / "empty_state.json"
+    assert get_last_destination(state_file) is None
+
+
+def test_save_and_get_last_destination(tmp_path: Path) -> None:
+    state_file = tmp_path / "config" / "state.json"
+    target = tmp_path / "my_output"
+    target.mkdir()
+
+    save_last_destination(target, state_path=state_file)
+    assert state_file.is_file()
+
+    loaded = get_last_destination(state_path=state_file)
+    assert loaded == target.resolve()
+
+
+def test_get_default_destination_fallback(tmp_path: Path) -> None:
+    state_file = tmp_path / "nonexistent.json"
+    default_dest = get_default_destination(state_path=state_file)
+    settings = load_settings()
+    assert default_dest == settings.output.resolved_dir
+
+
+def test_get_default_destination_uses_last(tmp_path: Path) -> None:
+    state_file = tmp_path / "state.json"
+    custom_dest = tmp_path / "custom_translations"
+    custom_dest.mkdir()
+    save_last_destination(custom_dest, state_path=state_file)
+
+    default_dest = get_default_destination(state_path=state_file)
+    assert default_dest == custom_dest.resolve()

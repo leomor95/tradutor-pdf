@@ -8,6 +8,8 @@ models/
 .cache/
 logs/
 out/
+config/state.json
+config/*.tmp
 
 # Python artifacts
 __pycache__/

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigError(Exception):
@@ -223,3 +228,62 @@ def load_glossary(path: Path | str | None = None) -> GlossaryConfig:
         preservar=tuple(preservar_raw),
         traduzir_como=dict(traduzir_como_raw),
     )
+
+
+def get_user_state_path(state_path: Path | str | None = None) -> Path:
+    """Return path to user state file in config/state.json, never in ~/.config."""
+    if state_path is not None:
+        return Path(state_path)
+    return find_project_root() / "config" / "state.json"
+
+
+def get_last_destination(state_path: Path | str | None = None) -> Path | None:
+    """Return the last used destination directory from config/state.json, or None."""
+    file_path = get_user_state_path(state_path)
+    if not file_path.is_file():
+        return None
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            dest_str = data.get("last_destination")
+            if dest_str and isinstance(dest_str, str):
+                return Path(dest_str).expanduser()
+    except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+        logger.warning("Failed to load user state from %s: %s", file_path, exc)
+    return None
+
+
+def save_last_destination(
+    destination: Path | str, state_path: Path | str | None = None
+) -> None:
+    """Save the last used destination directory to config/state.json."""
+    file_path = get_user_state_path(state_path)
+    dest_path = Path(destination).expanduser().resolve()
+    try:
+        data: dict[str, Any] = {}
+        if file_path.is_file():
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        data = loaded
+            except (OSError, json.JSONDecodeError):
+                data = {}
+        data["last_destination"] = str(dest_path)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_file = file_path.with_suffix(".tmp")
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        tmp_file.replace(file_path)
+    except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+        logger.warning("Failed to save user state to %s: %s", file_path, exc)
+
+
+def get_default_destination(state_path: Path | str | None = None) -> Path:
+    """Return effective destination directory: last used if present, otherwise default_dir from settings."""
+    last = get_last_destination(state_path)
+    if last is not None:
+        return last
+    settings = load_settings()
+    return settings.output.resolved_dir

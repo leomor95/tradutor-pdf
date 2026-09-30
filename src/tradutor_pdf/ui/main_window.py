@@ -25,7 +25,11 @@ from PySide6.QtWidgets import (
 )
 
 from tradutor_pdf.checkpoint.store import CheckpointStore
-from tradutor_pdf.config import load_settings
+from tradutor_pdf.config import (
+    get_default_destination,
+    load_settings,
+    save_last_destination,
+)
 from tradutor_pdf.export.converter import DocumentConverter
 from tradutor_pdf.translation.ollama_client import check_service_health
 from tradutor_pdf.translation.prompt import PROMPT_VERSION
@@ -138,9 +142,11 @@ class ExportDialog(QDialog):
         markdown_path: Path,
         default_dir: Path | None = None,
         parent: QWidget | None = None,
+        state_path: Path | str | None = None,
     ) -> None:
         super().__init__(parent)
         self.markdown_path = Path(markdown_path)
+        self.state_path = state_path
         self.exported_path: Path | None = None
 
         self.setWindowTitle("Exportar Tradução")
@@ -159,13 +165,13 @@ class ExportDialog(QDialog):
         form_group = QGroupBox("Formato de Saída", self)
         form_layout = QVBoxLayout(form_group)
         self.rb_pdf = QRadioButton(
-            "PDF (.pdf) — Documento formatado para leitura e impressão"
+            "&PDF (.pdf) — Documento formatado para leitura e impressão"
         )
         self.rb_epub = QRadioButton(
-            "EPUB (.epub) — Livro digital com sumário navegável"
+            "&EPUB (.epub) — Livro digital com sumário navegável"
         )
         self.rb_md = QRadioButton(
-            "Markdown (.md) — Texto original com pasta de imagens"
+            "&Markdown (.md) — Texto original com pasta de imagens"
         )
         self.rb_pdf.setChecked(True)
         form_layout.addWidget(self.rb_pdf)
@@ -176,8 +182,7 @@ class ExportDialog(QDialog):
         # Destination folder
         dest_group = QGroupBox("Pasta de Destino", self)
         dest_layout = QHBoxLayout(dest_group)
-        settings = load_settings()
-        initial_dir = default_dir or Path(settings.output.default_dir).expanduser()
+        initial_dir = default_dir or get_default_destination(state_path)
         self.dest_edit = QLineEdit(str(initial_dir))
         self.btn_browse = QPushButton("Procurar…")
         self.btn_browse.clicked.connect(self._browse_destination)
@@ -236,6 +241,7 @@ class ExportDialog(QDialog):
                 target_format=fmt,
                 destination=target_dir,
             )
+            save_last_destination(target_dir, state_path=self.state_path)
             self.accept()
         except Exception as exc:
             logger.exception("Export failed")
@@ -250,8 +256,10 @@ class ConversionDialog(QDialog):
         self,
         default_dir: Path | None = None,
         parent: QWidget | None = None,
+        state_path: Path | str | None = None,
     ) -> None:
         super().__init__(parent)
+        self.state_path = state_path
         self.converted_path: Path | None = None
         self.setWindowTitle("Converter Arquivo")
         self.resize(520, 260)
@@ -289,8 +297,7 @@ class ConversionDialog(QDialog):
         # Destination folder
         dest_group = QGroupBox("Pasta de Destino", self)
         dest_layout = QHBoxLayout(dest_group)
-        settings = load_settings()
-        initial_dir = default_dir or Path(settings.output.default_dir).expanduser()
+        initial_dir = default_dir or get_default_destination(state_path)
         self.dest_edit = QLineEdit(str(initial_dir))
         self.btn_browse_dest = QPushButton("Procurar…")
         self.btn_browse_dest.clicked.connect(self._browse_destination)
@@ -370,6 +377,7 @@ class ConversionDialog(QDialog):
                 target_format=target_fmt,
                 destination=target_dir,
             )
+            save_last_destination(target_dir, state_path=self.state_path)
             self.accept()
         except Exception as exc:
             logger.exception("Conversion failed")
@@ -537,8 +545,10 @@ class MainWindow(QMainWindow):
         self.exit_action.triggered.connect(self.close)
         file_menu.addAction(self.exit_action)
 
-    def _open_conversion_dialog(self) -> Path | None:
-        dialog = ConversionDialog(parent=self)
+    def _open_conversion_dialog(
+        self, state_path: Path | str | None = None
+    ) -> Path | None:
+        dialog = ConversionDialog(parent=self, state_path=state_path)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             if dialog.converted_path:
                 self.status_label.setStyleSheet("color: #1b8a36; font-size: 13px;")
@@ -548,9 +558,13 @@ class MainWindow(QMainWindow):
             return dialog.converted_path
         return None
 
-    def prompt_export(self, markdown_path: Path) -> Path | None:
+    def prompt_export(
+        self, markdown_path: Path, state_path: Path | str | None = None
+    ) -> Path | None:
         """Prompt user with export dialog to choose format and destination folder."""
-        dialog = ExportDialog(markdown_path=markdown_path, parent=self)
+        dialog = ExportDialog(
+            markdown_path=markdown_path, parent=self, state_path=state_path
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             if dialog.exported_path:
                 self.status_label.setStyleSheet("color: #1b8a36; font-size: 13px;")

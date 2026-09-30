@@ -357,3 +357,62 @@ def test_check_service_health_function(monkeypatch):
     ok, err = check_service_health(model="qwen2.5:7b-instruct-q4_K_M")
     assert ok
     assert err == ""
+
+
+def test_export_dialog_destination_persistence(qtbot, tmp_path: Path):
+    from tradutor_pdf.config import get_last_destination, save_last_destination
+    from tradutor_pdf.ui.main_window import ExportDialog
+
+    state_file = tmp_path / "config" / "state.json"
+    saved_folder = tmp_path / "previously_saved"
+    saved_folder.mkdir(parents=True)
+    save_last_destination(saved_folder, state_path=state_file)
+
+    md_file = tmp_path / "test.md"
+    md_file.write_text("# Test content", encoding="utf-8")
+
+    dialog = ExportDialog(markdown_path=md_file, state_path=state_file)
+    qtbot.addWidget(dialog)
+
+    # Check that it pre-filled with the remembered folder
+    assert dialog.dest_edit.text() == str(saved_folder.resolve())
+
+    # Export to a new folder
+    new_dest = tmp_path / "new_destination"
+    dialog.dest_edit.setText(str(new_dest))
+    dialog.rb_md.setChecked(True)
+
+    with qtbot.waitSignal(dialog.accepted, timeout=3000):
+        dialog.btn_export.click()
+
+    assert get_last_destination(state_path=state_file) == new_dest.resolve()
+
+
+def test_conversion_dialog_destination_persistence(qtbot, tmp_path: Path):
+    from tradutor_pdf.config import get_last_destination, save_last_destination
+    from tradutor_pdf.ui.main_window import ConversionDialog
+
+    state_file = tmp_path / "config" / "state.json"
+    first_folder = tmp_path / "folder_alpha"
+    first_folder.mkdir(parents=True)
+    save_last_destination(first_folder, state_path=state_file)
+
+    src_file = tmp_path / "sample.md"
+    src_file.write_text("# Sample", encoding="utf-8")
+
+    dialog = ConversionDialog(state_path=state_file)
+    qtbot.addWidget(dialog)
+
+    # Initial dir should be folder_alpha
+    assert dialog.dest_edit.text() == str(first_folder.resolve())
+
+    # Set source and new destination
+    folder_beta = tmp_path / "folder_beta"
+    dialog.src_edit.setText(str(src_file))
+    dialog.dest_edit.setText(str(folder_beta))
+    dialog.combo_format.setCurrentText("Markdown (.md)")
+
+    with qtbot.waitSignal(dialog.accepted, timeout=3000):
+        dialog.btn_convert.click()
+
+    assert get_last_destination(state_path=state_file) == folder_beta.resolve()
