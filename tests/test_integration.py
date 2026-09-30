@@ -10,7 +10,6 @@ from tradutor_pdf.segmentation.semantic import SemanticSegmenter
 from tradutor_pdf.translation.translator import OllamaTranslator
 from tradutor_pdf.ui.worker import TranslationWorker
 
-
 MOCK_SIMPLE_TRANSLATION = (
     "# Introdução à Computação Distribuída\n\n"
     "Sistemas distribuídos permitem que múltiplos computadores coordenem e resolvam "
@@ -72,6 +71,4 @@ def test_full_pipeline_worker_integration(fake_llm, qtbot, tmp_path: Path):
     out_file = finished_records[0]
     assert out_file == expected_output
     assert out_file.is_file()
-    assert "Introdução à Computação Distribuída" in out_file.read_text(
-        encoding="utf-8"
-    )
+    assert "Introdução à Computação Distribuída" in out_file.read_text(encoding="utf-8")
