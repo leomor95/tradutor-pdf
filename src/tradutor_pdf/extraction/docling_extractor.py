@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import contextlib
 import gc
 import logging
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import (
+    PdfPipelineOptions,
+    TesseractCliOcrOptions,
+)
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc.labels import DocItemLabel
 
 from tradutor_pdf.assembly.markdown import get_default_output_path
+from tradutor_pdf.config import find_project_root
+from tradutor_pdf.extraction.detection import detect_pages_needing_ocr
 from tradutor_pdf.pipeline import Block, BlockType, Extractor
 
 logger = logging.getLogger(__name__)
@@ -51,60 +58,113 @@ def get_pdf_page_count(source_path: Path) -> int:
         return 1
 
 
+def partition_page_range(
+    start_page: int,
+    end_page: int,
+    needing_ocr: set[int],
+) -> list[tuple[int, int, bool]]:
+    """Partition [start_page, end_page] into contiguous segments of (sub_start, sub_end, needs_ocr)."""
+    if start_page > end_page:
+        return []
+
+    segments: list[tuple[int, int, bool]] = []
+    seg_start = start_page
+    seg_ocr = start_page in needing_ocr
+
+    for p in range(start_page + 1, end_page + 1):
+        p_ocr = p in needing_ocr
+        if p_ocr != seg_ocr:
+            segments.append((seg_start, p - 1, seg_ocr))
+            seg_start = p
+            seg_ocr = p_ocr
+
+    segments.append((seg_start, end_page, seg_ocr))
+    return segments
+
+
 class DoclingExtractor(Extractor):
-    """Extracts structural blocks from PDF documents using Docling with streaming page windows."""
+    """Extracts structural blocks from PDF documents using Docling with streaming page windows and selective OCR."""
 
     def __init__(
         self,
-        do_ocr: bool = False,
+        do_ocr: bool | str = "auto",
+        ocr_languages: tuple[str, ...] | list[str] = ("eng",),
+        min_text_chars: int = 50,
         assets_dir: Path | None = None,
         default_window_size: int = 10,
     ) -> None:
         self.do_ocr = do_ocr
+        self.ocr_languages = tuple(ocr_languages)
+        self.min_text_chars = max(1, min_text_chars)
         self.assets_dir = Path(assets_dir) if assets_dir else None
         self.default_window_size = max(1, default_window_size)
 
-        pipeline_options = PdfPipelineOptions()
-        pipeline_options.do_ocr = do_ocr
-        pipeline_options.generate_picture_images = True
-        pipeline_options.heading_hierarchy_options.enabled = True
+        pipeline_options_no_ocr = PdfPipelineOptions()
+        pipeline_options_no_ocr.do_ocr = False
+        pipeline_options_no_ocr.generate_picture_images = True
+        pipeline_options_no_ocr.heading_hierarchy_options.enabled = True
 
-        self._converter = DocumentConverter(
+        self._no_ocr_converter = DocumentConverter(
             format_options={
-                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+                InputFormat.PDF: PdfFormatOption(
+                    pipeline_options=pipeline_options_no_ocr
+                )
             }
         )
+        self._ocr_converter: DocumentConverter | None = None
 
-    def extract_page_range(
-        self,
-        source_path: Path,
-        pages: tuple[int, int],
-        assets_dir: Path | None = None,
-        start_block_idx: int = 0,
-    ) -> list[Block]:
-        """Extract structural blocks from a specific page range [start_page, end_page]."""
-        source = Path(source_path)
-        if not source.exists():
-            raise FileNotFoundError(f"Source PDF file not found: {source}")
+    @property
+    def _converter(self) -> DocumentConverter:
+        """Backward-compatibility property for accessing default converter."""
+        if self.do_ocr is True:
+            return self._get_ocr_converter()
+        return self._no_ocr_converter
 
-        logger.info(
-            "Extracting blocks from %s (pages=%s, ocr=%s)",
-            source.name,
-            pages,
-            self.do_ocr,
-        )
+    def _get_tessdata_path(self) -> str | None:
+        """Resolve isolated tessdata directory, setting TESSDATA_PREFIX if found."""
+        if "TESSDATA_PREFIX" in os.environ:
+            return os.environ["TESSDATA_PREFIX"]
+        candidate = find_project_root() / "bin" / "tessdata"
+        if candidate.is_dir():
+            path_str = str(candidate.resolve())
+            os.environ["TESSDATA_PREFIX"] = path_str
+            return path_str
+        return None
 
-        target_assets_dir = (
-            Path(assets_dir)
-            if assets_dir is not None
-            else (
-                self.assets_dir or (get_default_output_path(source).parent / "assets")
+    def _get_ocr_converter(self) -> DocumentConverter:
+        """Lazily initialize and return the OCR-enabled DocumentConverter."""
+        if self._ocr_converter is None:
+            tessdata_path = self._get_tessdata_path()
+            pipeline_options_ocr = PdfPipelineOptions()
+            pipeline_options_ocr.do_ocr = True
+            pipeline_options_ocr.generate_picture_images = True
+            pipeline_options_ocr.heading_hierarchy_options.enabled = True
+            pipeline_options_ocr.ocr_options = TesseractCliOcrOptions(
+                lang=list(self.ocr_languages),
+                path=tessdata_path,
             )
-        )
+            self._ocr_converter = DocumentConverter(
+                format_options={
+                    InputFormat.PDF: PdfFormatOption(
+                        pipeline_options=pipeline_options_ocr
+                    )
+                }
+            )
+        return self._ocr_converter
 
-        convert_kwargs: dict[str, Any] = {"page_range": pages}
+    def _extract_sub_range(
+        self,
+        source: Path,
+        sub_pages: tuple[int, int],
+        is_ocr: bool,
+        target_assets_dir: Path,
+        start_block_idx: int,
+    ) -> list[Block]:
+        """Convert a contiguous slice of pages using the appropriate converter."""
+        converter = self._get_ocr_converter() if is_ocr else self._no_ocr_converter
+        convert_kwargs: dict[str, Any] = {"page_range": sub_pages}
 
-        result = self._converter.convert(source, **convert_kwargs)
+        result = converter.convert(source, **convert_kwargs)
         doc = result.document
 
         blocks: list[Block] = []
@@ -115,7 +175,7 @@ class DoclingExtractor(Extractor):
             block_type = _LABEL_TO_BLOCK_TYPE.get(label, BlockType.UNKNOWN)
 
             # Determine page number
-            page_no = pages[0]
+            page_no = sub_pages[0]
             prov = getattr(item, "prov", None)
             if prov and len(prov) > 0 and hasattr(prov[0], "page_no"):
                 page_no = prov[0].page_no
@@ -123,6 +183,7 @@ class DoclingExtractor(Extractor):
             metadata: dict[str, Any] = {
                 "label": label.value if hasattr(label, "value") else str(label),
                 "level": level,
+                "ocr": is_ocr,
             }
 
             # Content and type specific handling
@@ -159,10 +220,8 @@ class DoclingExtractor(Extractor):
                     finally:
                         if img_obj is not None:
                             if hasattr(img_obj, "close"):
-                                try:
+                                with contextlib.suppress(Exception):
                                     img_obj.close()
-                                except Exception:  # noqa: BLE001, S110
-                                    pass
                             del img_obj
 
                 alt = ""
@@ -241,8 +300,67 @@ class DoclingExtractor(Extractor):
         del result
         gc.collect()
 
+        logger.debug(
+            "Extracted %d blocks for sub-range %s (ocr=%s) from %s",
+            len(blocks),
+            sub_pages,
+            is_ocr,
+            source.name,
+        )
+        return blocks
+
+    def extract_page_range(
+        self,
+        source_path: Path,
+        pages: tuple[int, int],
+        assets_dir: Path | None = None,
+        start_block_idx: int = 0,
+    ) -> list[Block]:
+        """Extract structural blocks from a specific page range [start_page, end_page]."""
+        source = Path(source_path)
+        if not source.exists():
+            raise FileNotFoundError(f"Source PDF file not found: {source}")
+
+        target_assets_dir = (
+            Path(assets_dir)
+            if assets_dir is not None
+            else (
+                self.assets_dir or (get_default_output_path(source).parent / "assets")
+            )
+        )
+
+        if self.do_ocr is False:
+            segments = [(pages[0], pages[1], False)]
+        elif self.do_ocr is True:
+            segments = [(pages[0], pages[1], True)]
+        else:  # "auto"
+            needing_ocr = detect_pages_needing_ocr(
+                source, min_chars=self.min_text_chars, page_range=pages
+            )
+            segments = partition_page_range(pages[0], pages[1], needing_ocr)
+
         logger.info(
-            "Extracted %d blocks for page range %s from %s",
+            "Extracting blocks from %s (pages=%s, segments=%s)",
+            source.name,
+            pages,
+            segments,
+        )
+
+        blocks: list[Block] = []
+        cur_idx = start_block_idx
+        for sub_start, sub_end, is_ocr in segments:
+            sub_blocks = self._extract_sub_range(
+                source=source,
+                sub_pages=(sub_start, sub_end),
+                is_ocr=is_ocr,
+                target_assets_dir=target_assets_dir,
+                start_block_idx=cur_idx,
+            )
+            blocks.extend(sub_blocks)
+            cur_idx += len(sub_blocks)
+
+        logger.info(
+            "Extracted %d total blocks for page range %s from %s",
             len(blocks),
             pages,
             source.name,

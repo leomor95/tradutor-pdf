@@ -44,6 +44,25 @@ if [ "$TESSDATA_FOUND" = false ]; then
     echo "[OK] Idioma 'eng' configurado com sucesso em bin/tessdata/."
 fi
 
+# Garantir arquivos complementares do Tesseract (osd e configs) em bin/tessdata
+if [ -d "$ROOT_DIR/bin/tessdata" ]; then
+    if [ ! -f "$ROOT_DIR/bin/tessdata/osd.traineddata" ]; then
+        if [ -f "/usr/share/tessdata/osd.traineddata" ]; then
+            cp "/usr/share/tessdata/osd.traineddata" "$ROOT_DIR/bin/tessdata/"
+        else
+            echo "[INFO] Baixando osd.traineddata para bin/tessdata/..."
+            curl -fsSL -o "$ROOT_DIR/bin/tessdata/osd.traineddata" \
+                "https://github.com/tesseract-ocr/tessdata_fast/raw/main/osd.traineddata"
+        fi
+    fi
+    if [ ! -d "$ROOT_DIR/bin/tessdata/configs" ] && [ -d "/usr/share/tessdata/configs" ]; then
+        cp -r "/usr/share/tessdata/configs" "$ROOT_DIR/bin/tessdata/"
+    fi
+    if [ ! -d "$ROOT_DIR/bin/tessdata/tessconfigs" ] && [ -d "/usr/share/tessdata/tessconfigs" ]; then
+        cp -r "/usr/share/tessdata/tessconfigs" "$ROOT_DIR/bin/tessdata/"
+    fi
+fi
+
 # 3. GPU (nvidia-smi opcional)
 if command -v nvidia-smi >/dev/null 2>&1; then
     GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1 || echo "NVIDIA GPU")
