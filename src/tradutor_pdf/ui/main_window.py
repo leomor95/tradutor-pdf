@@ -28,6 +28,7 @@ from tradutor_pdf.checkpoint.store import CheckpointStore
 from tradutor_pdf.config import load_settings
 from tradutor_pdf.export.converter import DocumentConverter
 from tradutor_pdf.translation.prompt import PROMPT_VERSION
+from tradutor_pdf.ui.utils import format_eta
 from tradutor_pdf.ui.worker import TranslationWorker
 
 logger = logging.getLogger(__name__)
@@ -428,6 +429,12 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("Pronto para traduzir.")
         self.status_label.setStyleSheet("color: #444444; font-size: 13px;")
         status_layout.addWidget(self.status_label)
+        status_layout.addStretch()
+        self.eta_label = QLabel("")
+        self.eta_label.setStyleSheet(
+            "color: #555555; font-size: 13px; font-weight: 500;"
+        )
+        status_layout.addWidget(self.eta_label)
         root_layout.addLayout(status_layout)
 
     def _setup_menu(self) -> None:
@@ -505,6 +512,7 @@ class MainWindow(QMainWindow):
         self._total_chunks = 0
 
         self.drop_area.setEnabled(False)
+        self.eta_label.setText("")
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("Iniciando…")
         self.status_label.setStyleSheet("color: #0b63ce; font-size: 13px;")
@@ -525,10 +533,18 @@ class MainWindow(QMainWindow):
             self.current_worker.stage_changed.connect(self._on_stage_changed)
         if hasattr(self.current_worker, "page_progress"):
             self.current_worker.page_progress.connect(self._on_page_progress)
+        if hasattr(self.current_worker, "eta_updated"):
+            self.current_worker.eta_updated.connect(self._on_eta_updated)
         self.current_worker.finished.connect(self._on_finished)
         self.current_worker.failed.connect(self._on_failed)
 
         self.current_worker.start()
+
+    def _on_eta_updated(self, seconds: float) -> None:
+        if seconds > 0:
+            self.eta_label.setText(f"Tempo restante: {format_eta(seconds)}")
+        else:
+            self.eta_label.setText("")
 
     def _on_stage_changed(self, stage: str) -> None:
         self._current_stage = stage
@@ -580,6 +596,7 @@ class MainWindow(QMainWindow):
     def _on_finished(self, output_path: Path) -> None:
         logger.info("Translation finished: %s", output_path)
         self.drop_area.setEnabled(True)
+        self.eta_label.setText("")
         self.progress_bar.setValue(100)
         self.progress_bar.setFormat("100% Concluído")
         self.status_label.setStyleSheet("color: #1b8a36; font-size: 13px;")
@@ -592,6 +609,7 @@ class MainWindow(QMainWindow):
     def _on_failed(self, error_message: str) -> None:
         logger.error("Translation error: %s", error_message)
         self.drop_area.setEnabled(True)
+        self.eta_label.setText("")
         self.status_label.setStyleSheet("color: #d32f2f; font-size: 13px;")
         self.status_label.setText(f"Erro na tradução: {error_message}")
         self.current_worker = None

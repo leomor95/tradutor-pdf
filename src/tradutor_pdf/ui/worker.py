@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal
@@ -20,6 +21,7 @@ from tradutor_pdf.pipeline import Assembler, Chunk, Extractor, Segmenter, Transl
 from tradutor_pdf.segmentation.semantic import SemanticSegmenter
 from tradutor_pdf.translation.prompt import PROMPT_VERSION
 from tradutor_pdf.translation.translator import OllamaTranslator
+from tradutor_pdf.ui.utils import MovingAverageEstimator
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,7 @@ class TranslationWorker(QThread):
         str
     )  # "Extraindo" | "OCR" | "Segmentando" | "Traduzindo" | "Montando"
     page_progress = Signal(int, int, str)  # (current_page, total_pages, stage_name)
+    eta_updated = Signal(float)  # Remaining seconds
     status_changed = Signal(str)  # Status description in pt-BR
     finished = Signal(Path)  # Path to generated Markdown file
     failed = Signal(str)  # Failure message
@@ -179,6 +182,7 @@ class TranslationWorker(QThread):
             self.progress.emit(completed_so_far, total_chunks)
 
             self.stage_changed.emit("Traduzindo")
+            estimator = MovingAverageEstimator(window_size=10)
             prev_chunk: Chunk | None = None
             for idx, chunk in enumerate(chunks):
                 if self.isInterruptionRequested():
@@ -205,7 +209,16 @@ class TranslationWorker(QThread):
                     if prev_chunk and prev_chunk.translated_text
                     else None
                 )
+
+                t0 = time.perf_counter()
                 self.translator.translate(chunk, previous_context=prev_context)
+                duration = time.perf_counter() - t0
+                estimator.record(duration)
+
+                remaining = total_chunks - (idx + 1)
+                est_seconds = estimator.estimate_remaining(remaining)
+                if est_seconds is not None:
+                    self.eta_updated.emit(est_seconds)
 
                 # Atomically save to checkpoint
                 self.checkpoint_store.save_chunk(self.source_path, chunk, index=idx)
@@ -222,6 +235,7 @@ class TranslationWorker(QThread):
             if self.isInterruptionRequested():
                 return
 
+            self.eta_updated.emit(0.0)
             self.stage_changed.emit("Montando")
             self.page_progress.emit(total_pages, total_pages, "Montando")
             self.status_changed.emit("Finalizando montagem do Markdown...")
