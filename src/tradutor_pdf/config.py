@@ -47,6 +47,7 @@ class TranslationConfig:
 class OCRConfig:
     engine: str = "tesseract"
     languages: tuple[str, ...] = ("eng",)
+    min_chars: int = 50
 
     def __post_init__(self) -> None:
         if not self.engine or not isinstance(self.engine, str):
@@ -60,6 +61,10 @@ class OCRConfig:
                 raise ConfigError(
                     f"OCR language code must be a non-empty string, got: {lang!r}"
                 )
+        if not isinstance(self.min_chars, int) or self.min_chars < 1:
+            raise ConfigError(
+                f"OCR 'min_chars' must be a positive integer, got: {self.min_chars}"
+            )
 
 
 @dataclass(frozen=True)
@@ -169,6 +174,7 @@ def load_settings(path: Path | str | None = None) -> Settings:
     ocr_config = OCRConfig(
         engine=ocr_data.get("engine", "tesseract"),
         languages=tuple(languages_raw),
+        min_chars=int(ocr_data.get("min_chars", 50)),
     )
 
     output_config = OutputConfig(
