@@ -1,0 +1,9 @@
+preservar: # nunca traduzir
+  - bug
+  - pipeline
+  - deploy
+  - commit
+  - framework
+traduzir_como: # tradução fixa
+  "machine learning": "aprendizado de máquina"
+  "thread": "thread"

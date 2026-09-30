@@ -1,0 +1,13 @@
+[translation]
+model = "qwen2.5:7b-instruct-q4_K_M"
+target_language = "pt-BR"
+chunk_max_tokens = 800
+max_retries = 3
+temperature = 0.2
+
+[ocr]
+engine = "tesseract"
+languages = ["eng"]
+
+[output]
+default_dir = "~/Documentos"
