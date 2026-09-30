@@ -138,7 +138,10 @@ def remove_repeated_headers_footers(blocks: Sequence[Block]) -> list[Block]:
     return cleaned_blocks
 
 
-def clean_blocks(blocks: Sequence[Block]) -> list[Block]:
+def clean_blocks(
+    blocks: Sequence[Block],
+    reindex_from: int | None = None,
+) -> list[Block]:
     """Apply post-OCR cleaning: dehyphenation and header/footer filtering."""
     if not blocks:
         return []
@@ -158,9 +161,10 @@ def clean_blocks(blocks: Sequence[Block]) -> list[Block]:
         ):
             new_content = dehyphenate_text(b.content)
 
+        block_id = f"b{reindex_from + idx}" if reindex_from is not None else b.id
         cleaned.append(
             Block(
-                id=f"b{idx}",
+                id=block_id,
                 type=b.type,
                 content=new_content,
                 page=b.page,

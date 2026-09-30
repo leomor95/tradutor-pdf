@@ -360,7 +360,7 @@ class DoclingExtractor(Extractor):
             blocks.extend(sub_blocks)
             cur_idx += len(sub_blocks)
 
-        cleaned_blocks = clean_blocks(blocks)
+        cleaned_blocks = clean_blocks(blocks, reindex_from=start_block_idx)
         logger.info(
             "Extracted %d total blocks for page range %s from %s (cleaned: %d)",
             len(blocks),
@@ -441,7 +441,7 @@ class DoclingExtractor(Extractor):
         ):
             all_blocks.extend(window_blocks)
 
-        cleaned_all = clean_blocks(all_blocks)
+        cleaned_all = clean_blocks(all_blocks, reindex_from=0)
         logger.info(
             "Extracted %d total blocks across all windows from %s (cleaned: %d)",
             len(all_blocks),

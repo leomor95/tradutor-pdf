@@ -159,11 +159,14 @@ def test_clean_blocks_end_to_end():
         Block(id="b5", type=BlockType.PARAGRAPH, content="2", page=2),
     ]
 
-    cleaned = clean_blocks(blocks)
-
-    # 2 content blocks remain, re-indexed b0, b1
+    cleaned = clean_blocks(blocks, reindex_from=0)
     assert len(cleaned) == 2
     assert cleaned[0].id == "b0"
     assert cleaned[0].content == "High-concurrency message broker."
     assert cleaned[1].id == "b1"
     assert cleaned[1].content == "Scalable architecture."
+
+    # When reindex_from is None, original ids are preserved
+    cleaned_preserve = clean_blocks(blocks)
+    assert cleaned_preserve[0].id == "b1"
+    assert cleaned_preserve[1].id == "b4"
