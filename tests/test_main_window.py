@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl
+from PySide6.QtCore import QMimeData, QPoint, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 
 from tradutor_pdf.pipeline import Block, BlockType, Extractor, Translator
@@ -416,3 +416,78 @@ def test_conversion_dialog_destination_persistence(qtbot, tmp_path: Path):
         dialog.btn_convert.click()
 
     assert get_last_destination(state_path=state_file) == folder_beta.resolve()
+
+
+def test_main_window_max_four_interactions_flow(qtbot, tmp_path: Path):
+    from fpdf import FPDF
+
+    from tradutor_pdf.ui.main_window import ExportDialog, MainWindow
+
+    state_file = tmp_path / "config" / "state.json"
+    dummy_pdf = tmp_path / "book.pdf"
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("helvetica", size=12)
+    pdf.cell(text="Chapter 1: The Beginning")
+    pdf.output(str(dummy_pdf))
+
+    md_output = tmp_path / "book.pt-BR.md"
+    md_output.write_text("# Capítulo 1: O Começo\n\nTexto traduzido.", encoding="utf-8")
+
+    interactions_count = 0
+
+    class MockWorker(QThread):
+        progress = Signal(int, int)
+        status_changed = Signal(str)
+        stage_changed = Signal(str)
+        page_progress = Signal(int, int, str)
+        eta_updated = Signal(float)
+        finished = Signal(Path)
+        failed = Signal(str)
+
+        def __init__(self, source_path: Path, **kwargs):
+            super().__init__()
+            self.source_path = source_path
+
+        def run(self):
+            self.stage_changed.emit("Traduzindo")
+            self.page_progress.emit(1, 1, "Traduzindo")
+            self.progress.emit(1, 1)
+            self.finished.emit(md_output)
+
+    window = MainWindow(
+        worker_factory=lambda p: MockWorker(p),
+        auto_prompt_export=False,
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    # Interaction 1: User drops PDF
+    interactions_count += 1
+    window.drop_area.file_dropped.emit(dummy_pdf)
+
+    # Wait for translation to complete
+    qtbot.waitUntil(lambda: window.progress_bar.value() == 100, timeout=3000)
+    assert "Tradução salva com sucesso" in window.status_label.text()
+
+    # ExportDialog opens
+    export_dialog = ExportDialog(markdown_path=md_output, state_path=state_file)
+    qtbot.addWidget(export_dialog)
+
+    # Interaction 2: User selects format (e.g. Markdown)
+    interactions_count += 1
+    export_dialog.rb_md.click()
+
+    # Interaction 3: User changes destination folder
+    interactions_count += 1
+    dest_dir = tmp_path / "final_export"
+    export_dialog.dest_edit.setText(str(dest_dir))
+
+    # Interaction 4: User clicks Confirm / Export
+    interactions_count += 1
+    with qtbot.waitSignal(export_dialog.accepted, timeout=3000):
+        export_dialog.btn_export.click()
+
+    # Verify maximum 4 interactions requirement (RNF18)
+    assert interactions_count <= 4
+    assert (dest_dir / "book.pt-BR.md").is_file()
