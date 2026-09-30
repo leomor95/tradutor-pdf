@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -29,7 +30,9 @@ def get_default_output_path(source_path: Path, sha256_hash: str | None = None) -
         else:
             sha256_hash = hashlib.sha256(source.name.encode("utf-8")).hexdigest()
 
-    cache_dir = find_project_root() / ".cache" / sha256_hash / "output"
+    cache_env = os.environ.get("TRADUTOR_CACHE_DIR")
+    base_dir = Path(cache_env) if cache_env else (find_project_root() / ".cache")
+    cache_dir = base_dir / sha256_hash / "output"
     output_filename = f"{source.stem}.pt-BR.md"
     return cache_dir / output_filename
 

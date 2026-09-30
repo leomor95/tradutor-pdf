@@ -175,7 +175,7 @@ class MainWindow(QMainWindow):
 
         checkpoint_store = CheckpointStore()
         on_conflict = "reuse"
-        if checkpoint_store.has_checkpoint(pdf_path):
+        if pdf_path.is_file() and checkpoint_store.has_checkpoint(pdf_path):
             manifest = checkpoint_store.load_manifest(pdf_path)
             settings = load_settings()
             if manifest and (

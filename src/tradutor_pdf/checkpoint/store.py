@@ -138,11 +138,21 @@ class CheckpointStore:
         if base_cache_dir is not None:
             self.base_cache_dir = Path(base_cache_dir)
         else:
-            self.base_cache_dir = find_project_root() / ".cache"
+            cache_env = os.environ.get("TRADUTOR_CACHE_DIR")
+            self.base_cache_dir = (
+                Path(cache_env) if cache_env else (find_project_root() / ".cache")
+            )
 
     def get_cache_dir(self, source_path: Path, sha256_hash: str | None = None) -> Path:
         source = Path(source_path)
-        sha = sha256_hash if sha256_hash is not None else compute_file_sha256(source)
+        if sha256_hash is not None:
+            sha = sha256_hash
+        elif source.is_file():
+            sha = compute_file_sha256(source)
+        else:
+            import hashlib
+
+            sha = hashlib.sha256(source.name.encode("utf-8")).hexdigest()
         return self.base_cache_dir / sha
 
     def get_manifest_path(
@@ -154,6 +164,9 @@ class CheckpointStore:
         return self.get_cache_dir(source_path, sha256_hash) / "chunks"
 
     def has_checkpoint(self, source_path: Path, sha256_hash: str | None = None) -> bool:
+        source = Path(source_path)
+        if sha256_hash is None and not source.is_file():
+            return False
         manifest_path = self.get_manifest_path(source_path, sha256_hash)
         return manifest_path.is_file()
 
