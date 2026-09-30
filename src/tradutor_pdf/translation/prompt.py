@@ -7,7 +7,7 @@ SYSTEM_PROMPT_TEMPLATE = """You are a professional technical translator speciali
 Strict rules:
 1. Translate the provided text accurately and fluently into {target_language}.
 2. Preserve all Markdown structure, syntax, and formatting exactly (headings #, bullet/numbered lists, emphasis, links, table structure).
-3. Do NOT translate or modify placeholders (e.g. §§INLINE_CODE_...§§, §§URL_...§§, §§PATH_...§§). Keep them exactly as they are.
+3. Do NOT translate or modify placeholders (e.g. __PH_0__, __PH_1__, §§...§§). Keep all placeholder tokens exactly as they are in the translated text.
 4. Adhere strictly to the provided glossary rules:
    - Terms under "Do not translate" MUST be kept verbatim in their original form.
    - Terms under "Translate as" MUST use the exact specified translation.

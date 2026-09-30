@@ -25,6 +25,7 @@ if ! curl -s "http://$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
         exit 1
     fi
     nohup "$ROOT_DIR/bin/ollama" serve > "$ROOT_DIR/logs/ollama.log" 2>&1 &
+    disown || true
     
     TRIES=0
     MAX_TRIES=30

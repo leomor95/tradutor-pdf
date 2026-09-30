@@ -40,7 +40,7 @@ CHAT_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 HEADING_PATTERN = re.compile(r"^#{1,6}\s+", re.MULTILINE)
 LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+", re.MULTILINE)
-PLACEHOLDER_PATTERN = re.compile(r"§§[A-Z_]+_\d+§§")
+PLACEHOLDER_PATTERN = re.compile(r"(?:__\s*PH_\d+\s*__|§§[A-Z0-9_]+§§)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -91,18 +91,31 @@ class TranslationValidator:
                 break
 
         # 3. Validate placeholder preservation
-        expected_placeholders: list[str]
         if placeholders is not None:
-            expected_placeholders = sorted(placeholders.keys())
-        else:
-            expected_placeholders = sorted(PLACEHOLDER_PATTERN.findall(original_text))
+            missing_placeholders: list[str] = []
+            for ph_key in placeholders:
+                m = re.match(r"^__PH_(\d+)__$", ph_key)
+                if m:
+                    ph_pat = re.compile(rf"__\s*PH_{m.group(1)}\s*__", re.IGNORECASE)
+                else:
+                    ph_pat = re.compile(re.escape(ph_key), re.IGNORECASE)
 
-        response_placeholders = sorted(PLACEHOLDER_PATTERN.findall(cleaned))
-        if expected_placeholders != response_placeholders:
-            reasons.append(
-                f"Divergência de placeholders: esperado {expected_placeholders}, "
-                f"encontrado {response_placeholders}"
-            )
+                if not ph_pat.search(cleaned):
+                    missing_placeholders.append(ph_key)
+
+            if missing_placeholders:
+                reasons.append(
+                    f"Divergência de placeholders: esperado {sorted(placeholders.keys())}, "
+                    f"ausente(s): {missing_placeholders}"
+                )
+        else:
+            orig_phs = sorted(PLACEHOLDER_PATTERN.findall(original_text))
+            resp_phs = sorted(PLACEHOLDER_PATTERN.findall(cleaned))
+            if len(orig_phs) != len(resp_phs):
+                reasons.append(
+                    f"Divergência de placeholders: esperado {orig_phs}, "
+                    f"encontrado {resp_phs}"
+                )
 
         # 4. Validate heading count
         orig_headings = HEADING_PATTERN.findall(original_text)

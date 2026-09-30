@@ -11,18 +11,21 @@ from tradutor_pdf.translation.translator import OllamaTranslator
 from tradutor_pdf.ui.worker import TranslationWorker
 
 
+MOCK_SIMPLE_TRANSLATION = (
+    "# Introdução à Computação Distribuída\n\n"
+    "Sistemas distribuídos permitem que múltiplos computadores coordenem e resolvam "
+    "grandes problemas computacionais de forma eficiente.\n\n"
+    "## Principais Benefícios dos Sistemas Distribuídos\n\n"
+    "- Alta disponibilidade e tolerância a falhas.\n"
+    "- Escalabilidade horizontal entre nós de trabalho."
+)
+
+
 def test_full_pipeline_cli_integration(fake_llm, tmp_path: Path):
     fixture_pdf = (Path(__file__).parent / "fixtures" / "simple.pdf").resolve()
     assert fixture_pdf.is_file(), f"Fixture PDF not found at {fixture_pdf}"
 
-    def mock_translation(prompt: str) -> str:
-        if "Getting Started" in prompt:
-            return "# Introdução à Computação Distribuída\n\nSistemas distribuídos permitem que múltiplos computadores coordenem e resolvam problemas computacionais de forma eficiente."
-        if "Key Benefits" in prompt:
-            return "## Principais Benefícios\n\n- Alta disponibilidade e tolerância a falhas.\n- Escalabilidade horizontal entre nós de trabalho."
-        return "Texto traduzido em pt-BR."
-
-    fake_llm.custom_handler = mock_translation
+    fake_llm.default_response = MOCK_SIMPLE_TRANSLATION
     translator = OllamaTranslator(client=fake_llm)
     output_md = tmp_path / "simple.pt-BR.md"
 
@@ -47,9 +50,7 @@ def test_full_pipeline_worker_integration(fake_llm, qtbot, tmp_path: Path):
     fixture_pdf = (Path(__file__).parent / "fixtures" / "simple.pdf").resolve()
     assert fixture_pdf.is_file()
 
-    fake_llm.default_response = (
-        "# Documento Traduzido\n\nConteúdo traduzido com sucesso."
-    )
+    fake_llm.default_response = MOCK_SIMPLE_TRANSLATION
     translator = OllamaTranslator(client=fake_llm)
     expected_output = get_default_output_path(fixture_pdf)
 
@@ -71,4 +72,6 @@ def test_full_pipeline_worker_integration(fake_llm, qtbot, tmp_path: Path):
     out_file = finished_records[0]
     assert out_file == expected_output
     assert out_file.is_file()
-    assert "Documento Traduzido" in out_file.read_text(encoding="utf-8")
+    assert "Introdução à Computação Distribuída" in out_file.read_text(
+        encoding="utf-8"
+    )
