@@ -4,6 +4,10 @@ import logging
 
 from tradutor_pdf.pipeline import Chunk, Translator
 from tradutor_pdf.translation.ollama_client import OllamaClient
+from tradutor_pdf.translation.placeholders import (
+    protect_placeholders,
+    restore_placeholders,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +68,9 @@ class OllamaTranslator(Translator):
             chunk.status = "skipped"
             return chunk.original_text
 
-        prompt = f"Translate the following text to {self.target_language}:\n\n{chunk.original_text}"
+        protected_text, placeholders = protect_placeholders(chunk.original_text)
+
+        prompt = f"Translate the following text to {self.target_language}:\n\n{protected_text}"
 
         logger.info(
             "Translating chunk %s (%d tokens) with model %s",
@@ -81,9 +87,10 @@ class OllamaTranslator(Translator):
                 temperature=self.temperature,
             )
             cleaned = strip_code_fence_wrapper(response)
-            chunk.translated_text = cleaned
+            restored = restore_placeholders(cleaned, placeholders)
+            chunk.translated_text = restored
             chunk.status = "translated"
-            return cleaned
+            return restored
         except Exception as exc:
             chunk.status = "error"
             chunk.error_message = str(exc)
