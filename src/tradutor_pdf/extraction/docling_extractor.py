@@ -131,7 +131,16 @@ class DoclingExtractor(Extractor):
                         img_obj.save(img_save_path, "PNG")
                         metadata["image_path"] = str(img_save_path)
 
-                alt = getattr(item, "caption_text", None) or ""
+                alt = ""
+                if hasattr(item, "caption_text"):
+                    try:
+                        alt = (
+                            item.caption_text(doc)
+                            if callable(item.caption_text)
+                            else str(item.caption_text)
+                        )
+                    except (TypeError, ValueError, AttributeError):
+                        alt = ""
                 if not alt and hasattr(item, "text") and item.text:
                     alt = item.text.strip()
                 metadata["alt"] = alt or f"image_{block_idx}"
