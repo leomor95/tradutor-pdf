@@ -72,3 +72,137 @@ def test_segment_splits_on_max_tokens():
     for i, chunk in enumerate(chunks):
         assert chunk.id == f"chunk-{i}"
         assert chunk.page_start == i + 1
+
+
+def test_semantic_segmenter_protocol():
+    from tradutor_pdf.segmentation.semantic import SemanticSegmenter
+
+    segmenter = SemanticSegmenter()
+    assert isinstance(segmenter, Segmenter)
+
+
+def test_semantic_segmenter_separates_non_translatable():
+    from tradutor_pdf.segmentation.semantic import SemanticSegmenter
+
+    segmenter = SemanticSegmenter()
+    blocks = [
+        Block(
+            id="b0",
+            type=BlockType.HEADING,
+            content="Architecture",
+            page=1,
+            metadata={"heading_level": 1},
+        ),
+        Block(
+            id="b1",
+            type=BlockType.PARAGRAPH,
+            content="Here is a description of the system.",
+            page=1,
+        ),
+        Block(
+            id="b2",
+            type=BlockType.CODE,
+            content="def run():\n    pass",
+            page=1,
+            translatable=False,
+            metadata={"language": "python"},
+        ),
+        Block(
+            id="b3",
+            type=BlockType.PARAGRAPH,
+            content="And here is a summary following the code.",
+            page=1,
+        ),
+        Block(
+            id="b4",
+            type=BlockType.TABLE,
+            content="| Col1 | Col2 |\n|---|---|\n| A | B |",
+            page=2,
+            translatable=False,
+        ),
+        Block(
+            id="b5",
+            type=BlockType.IMAGE,
+            content="assets/img_001.png",
+            page=2,
+            translatable=False,
+            metadata={"alt": "Sample Diagram"},
+        ),
+    ]
+
+    chunks = segmenter.segment(blocks, max_tokens=800)
+
+    # Expected chunks:
+    # 0: Heading + Paragraph (translatable)
+    # 1: Code (skipped, non-translatable)
+    # 2: Paragraph (translatable)
+    # 3: Table (skipped, non-translatable)
+    # 4: Image (skipped, non-translatable)
+    assert len(chunks) == 5
+
+    assert chunks[0].status == "pending"
+    assert "# Architecture" in chunks[0].original_text
+    assert "Here is a description" in chunks[0].original_text
+
+    assert chunks[1].status == "skipped"
+    assert "```python\ndef run():\n    pass\n```" in chunks[1].original_text
+    assert chunks[1].translated_text == chunks[1].original_text
+
+    assert chunks[2].status == "pending"
+    assert "And here is a summary" in chunks[2].original_text
+
+    assert chunks[3].status == "skipped"
+    assert "| Col1 | Col2 |" in chunks[3].original_text
+
+    assert chunks[4].status == "skipped"
+    assert "![Sample Diagram](assets/img_001.png)" in chunks[4].original_text
+
+
+def test_semantic_segmenter_heading_levels_and_lists():
+    from tradutor_pdf.segmentation.semantic import SemanticSegmenter
+
+    segmenter = SemanticSegmenter()
+    blocks = [
+        Block(
+            id="b0",
+            type=BlockType.HEADING,
+            content="Main Title",
+            page=1,
+            metadata={"heading_level": 1},
+        ),
+        Block(
+            id="b1",
+            type=BlockType.HEADING,
+            content="Subtitle Section",
+            page=1,
+            metadata={"heading_level": 2},
+        ),
+        Block(
+            id="b2",
+            type=BlockType.HEADING,
+            content="Subsection Detail",
+            page=1,
+            metadata={"heading_level": 3},
+        ),
+        Block(
+            id="b3",
+            type=BlockType.LIST_ITEM,
+            content="First item",
+            page=1,
+        ),
+        Block(
+            id="b4",
+            type=BlockType.LIST_ITEM,
+            content="- Already bulleted",
+            page=1,
+        ),
+    ]
+
+    chunks = segmenter.segment(blocks, max_tokens=800)
+    assert len(chunks) == 1
+    text = chunks[0].original_text
+    assert "# Main Title" in text
+    assert "## Subtitle Section" in text
+    assert "### Subsection Detail" in text
+    assert "- First item" in text
+    assert "- Already bulleted" in text
