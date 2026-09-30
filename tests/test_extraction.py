@@ -105,3 +105,54 @@ def test_docling_extractor_code_blocks():
         "process_batch" in b.content or "export WORKER_ENV" in b.content
         for b in code_blocks
     )
+
+
+def test_get_pdf_page_count():
+    from tradutor_pdf.extraction.docling_extractor import get_pdf_page_count
+
+    fixture_10p = Path("tests/fixtures/benchmark_10p.pdf")
+    assert get_pdf_page_count(fixture_10p) == 10
+
+    fixture_1p = Path("tests/fixtures/simple.pdf")
+    assert get_pdf_page_count(fixture_1p) == 1
+
+
+def test_docling_extractor_iter_windows():
+    fixture_10p = Path("tests/fixtures/benchmark_10p.pdf")
+    extractor = DoclingExtractor(do_ocr=False, default_window_size=3)
+
+    windows = list(extractor.iter_windows(fixture_10p, window_size=3))
+    # 10 pages in windows of 3: (1, 3), (4, 6), (7, 9), (10, 10)
+    assert len(windows) == 4
+    assert windows[0][0] == (1, 3)
+    assert windows[1][0] == (4, 6)
+    assert windows[2][0] == (7, 9)
+    assert windows[3][0] == (10, 10)
+
+    # Check block IDs are contiguous
+    all_blocks = []
+    for _pr, w_blocks in windows:
+        all_blocks.extend(w_blocks)
+
+    block_ids = [b.id for b in all_blocks]
+    expected_ids = [f"b{i}" for i in range(len(all_blocks))]
+    assert block_ids == expected_ids
+    assert len(all_blocks) > 0
+
+
+def test_docling_extractor_images_not_kept_in_memory(tmp_path: Path):
+    fixture_pdf = Path("tests/fixtures/tables_images.pdf")
+    assets_dir = tmp_path / "assets"
+    extractor = DoclingExtractor(do_ocr=False, assets_dir=assets_dir)
+    blocks = extractor.extract(fixture_pdf)
+
+    image_blocks = [b for b in blocks if b.type == BlockType.IMAGE]
+    assert len(image_blocks) >= 1
+
+    for img_block in image_blocks:
+        # metadata must contain image_path string, never PIL Image or raw bytes
+        img_path_str = img_block.metadata.get("image_path")
+        assert isinstance(img_path_str, str)
+        assert Path(img_path_str).is_file()
+        assert "image" not in img_block.metadata
+        assert "img_obj" not in img_block.metadata

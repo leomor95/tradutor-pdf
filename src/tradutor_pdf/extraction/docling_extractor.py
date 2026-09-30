@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gc
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -29,16 +31,38 @@ _LABEL_TO_BLOCK_TYPE: dict[DocItemLabel, BlockType] = {
 }
 
 
+def get_pdf_page_count(source_path: Path) -> int:
+    """Return total number of pages in PDF document without loading entire file."""
+    source = Path(source_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"Source PDF file not found: {source}")
+    try:
+        import pypdfium2 as pdfium
+
+        doc = pdfium.PdfDocument(str(source))
+        try:
+            return len(doc)
+        finally:
+            doc.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "pypdfium2 could not get page count (%s), falling back to 1", exc
+        )
+        return 1
+
+
 class DoclingExtractor(Extractor):
-    """Extracts structural blocks from PDF documents using Docling without OCR."""
+    """Extracts structural blocks from PDF documents using Docling with streaming page windows."""
 
     def __init__(
         self,
         do_ocr: bool = False,
         assets_dir: Path | None = None,
+        default_window_size: int = 10,
     ) -> None:
         self.do_ocr = do_ocr
         self.assets_dir = Path(assets_dir) if assets_dir else None
+        self.default_window_size = max(1, default_window_size)
 
         pipeline_options = PdfPipelineOptions()
         pipeline_options.do_ocr = do_ocr
@@ -51,12 +75,14 @@ class DoclingExtractor(Extractor):
             }
         )
 
-    def extract(
+    def extract_page_range(
         self,
         source_path: Path,
-        pages: tuple[int, int] | None = None,
+        pages: tuple[int, int],
         assets_dir: Path | None = None,
+        start_block_idx: int = 0,
     ) -> list[Block]:
+        """Extract structural blocks from a specific page range [start_page, end_page]."""
         source = Path(source_path)
         if not source.exists():
             raise FileNotFoundError(f"Source PDF file not found: {source}")
@@ -76,22 +102,20 @@ class DoclingExtractor(Extractor):
             )
         )
 
-        convert_kwargs: dict[str, Any] = {}
-        if pages is not None:
-            convert_kwargs["page_range"] = pages
+        convert_kwargs: dict[str, Any] = {"page_range": pages}
 
         result = self._converter.convert(source, **convert_kwargs)
         doc = result.document
 
         blocks: list[Block] = []
-        block_idx = 0
+        block_idx = start_block_idx
 
         for item, level in doc.iterate_items():
             label = getattr(item, "label", None)
             block_type = _LABEL_TO_BLOCK_TYPE.get(label, BlockType.UNKNOWN)
 
             # Determine page number
-            page_no = 1
+            page_no = pages[0]
             prov = getattr(item, "prov", None)
             if prov and len(prov) > 0 and hasattr(prov[0], "page_no"):
                 page_no = prov[0].page_no
@@ -125,11 +149,21 @@ class DoclingExtractor(Extractor):
                 content = rel_path
 
                 if hasattr(item, "get_image"):
-                    img_obj = item.get_image(doc)
-                    if img_obj is not None:
-                        img_save_path = target_assets_dir / img_filename
-                        img_obj.save(img_save_path, "PNG")
-                        metadata["image_path"] = str(img_save_path)
+                    img_obj = None
+                    try:
+                        img_obj = item.get_image(doc)
+                        if img_obj is not None:
+                            img_save_path = target_assets_dir / img_filename
+                            img_obj.save(img_save_path, "PNG")
+                            metadata["image_path"] = str(img_save_path)
+                    finally:
+                        if img_obj is not None:
+                            if hasattr(img_obj, "close"):
+                                try:
+                                    img_obj.close()
+                                except Exception:  # noqa: BLE001, S110
+                                    pass
+                            del img_obj
 
                 alt = ""
                 if hasattr(item, "caption_text"):
@@ -203,5 +237,92 @@ class DoclingExtractor(Extractor):
             blocks.append(block)
             block_idx += 1
 
-        logger.info("Extracted %d blocks from %s", len(blocks), source.name)
+        del doc
+        del result
+        gc.collect()
+
+        logger.info(
+            "Extracted %d blocks for page range %s from %s",
+            len(blocks),
+            pages,
+            source.name,
+        )
         return blocks
+
+    def iter_windows(
+        self,
+        source_path: Path,
+        window_size: int | None = None,
+        assets_dir: Path | None = None,
+    ) -> Iterator[tuple[tuple[int, int], list[Block]]]:
+        """Yield (page_range, blocks) for each window of pages in the PDF document."""
+        source = Path(source_path)
+        if not source.is_file():
+            raise FileNotFoundError(f"Source PDF file not found: {source}")
+
+        eff_window_size = max(1, window_size or self.default_window_size)
+        total_pages = get_pdf_page_count(source)
+        cur_block_idx = 0
+
+        for start in range(1, total_pages + 1, eff_window_size):
+            end = min(start + eff_window_size - 1, total_pages)
+            page_range = (start, end)
+            blocks = self.extract_page_range(
+                source_path=source,
+                pages=page_range,
+                assets_dir=assets_dir,
+                start_block_idx=cur_block_idx,
+            )
+            cur_block_idx += len(blocks)
+            yield page_range, blocks
+
+    def extract(
+        self,
+        source_path: Path,
+        pages: tuple[int, int] | None = None,
+        assets_dir: Path | None = None,
+        window_size: int | None = None,
+    ) -> list[Block]:
+        source = Path(source_path)
+        if not source.exists():
+            raise FileNotFoundError(f"Source PDF file not found: {source}")
+
+        if pages is not None:
+            return self.extract_page_range(
+                source_path=source,
+                pages=pages,
+                assets_dir=assets_dir,
+                start_block_idx=0,
+            )
+
+        eff_window_size = max(1, window_size or self.default_window_size)
+        total_pages = get_pdf_page_count(source)
+
+        if total_pages <= eff_window_size:
+            return self.extract_page_range(
+                source_path=source,
+                pages=(1, total_pages),
+                assets_dir=assets_dir,
+                start_block_idx=0,
+            )
+
+        logger.info(
+            "Extracting blocks from %s in streaming windows of %d pages (total %d)",
+            source.name,
+            eff_window_size,
+            total_pages,
+        )
+        all_blocks: list[Block] = []
+        for _page_range, window_blocks in self.iter_windows(
+            source_path=source,
+            window_size=eff_window_size,
+            assets_dir=assets_dir,
+        ):
+            all_blocks.extend(window_blocks)
+
+        logger.info(
+            "Extracted %d total blocks across all windows from %s",
+            len(all_blocks),
+            source.name,
+        )
+        return all_blocks
