@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from tradutor_pdf.checkpoint.store import CheckpointStore
 from tradutor_pdf.config import load_settings
 from tradutor_pdf.export.converter import DocumentConverter
+from tradutor_pdf.translation.ollama_client import check_service_health
 from tradutor_pdf.translation.prompt import PROMPT_VERSION
 from tradutor_pdf.ui.utils import format_eta
 from tradutor_pdf.ui.worker import TranslationWorker
@@ -114,6 +115,8 @@ class DropArea(QFrame):
         event.ignore()
 
     def _open_file_dialog(self) -> None:
+        if not self.isEnabled():
+            return
         file_path_str, _ = QFileDialog.getOpenFileName(
             self,
             "Selecionar documento PDF",
@@ -371,11 +374,13 @@ class MainWindow(QMainWindow):
         self,
         worker_factory: Callable[[Path], TranslationWorker] | None = None,
         auto_prompt_export: bool = True,
+        health_checker: Callable[[], tuple[bool, str]] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.worker_factory = worker_factory
         self.auto_prompt_export = auto_prompt_export
+        self.health_checker = health_checker or self._default_health_check
         self.setWindowTitle("Tradutor de PDF")
         self.resize(640, 420)
         self.current_worker: TranslationWorker | None = None
@@ -411,6 +416,27 @@ class MainWindow(QMainWindow):
         self.btn_convert_dialog.clicked.connect(self._open_conversion_dialog)
         top_layout.addWidget(self.btn_convert_dialog)
         root_layout.addLayout(top_layout)
+
+        # Service health banner (shown only when Ollama is unavailable or model is missing)
+        self.banner_frame = QFrame(self)
+        self.banner_frame.setStyleSheet(
+            "background-color: #fff3cd; border: 1px solid #ffeeba; border-radius: 6px;"
+        )
+        banner_layout = QHBoxLayout(self.banner_frame)
+        banner_layout.setContentsMargins(12, 8, 12, 8)
+        self.banner_label = QLabel("")
+        self.banner_label.setWordWrap(True)
+        self.banner_label.setStyleSheet("color: #856404; font-size: 13px;")
+        banner_layout.addWidget(self.banner_label, stretch=1)
+
+        self.btn_retry_health = QPushButton("Verificar novamente")
+        self.btn_retry_health.setStyleSheet(
+            "padding: 5px 12px; font-size: 12px; font-weight: bold;"
+        )
+        self.btn_retry_health.clicked.connect(self.perform_health_check)
+        banner_layout.addWidget(self.btn_retry_health)
+        self.banner_frame.setVisible(False)
+        root_layout.addWidget(self.banner_frame)
 
         # Drag and drop area
         self.drop_area = DropArea(self)
@@ -455,6 +481,35 @@ class MainWindow(QMainWindow):
         self.btn_resume.clicked.connect(self.resume_translation)
         controls_layout.addWidget(self.btn_resume)
         root_layout.addLayout(controls_layout)
+
+        # Check health on startup
+        self.perform_health_check()
+
+    def _default_health_check(self) -> tuple[bool, str]:
+        settings = load_settings()
+        return check_service_health(
+            host=settings.ollama_host,
+            model=settings.translation.model,
+        )
+
+    def perform_health_check(self) -> bool:
+        """Run health check on Ollama service and model."""
+        ok, error_msg = self.health_checker()
+        if ok:
+            self.drop_area.setEnabled(True)
+            self.banner_frame.setVisible(False)
+            self.status_label.setStyleSheet("color: #444444; font-size: 13px;")
+            self.status_label.setText("Pronto para traduzir.")
+            return True
+        else:
+            self.drop_area.setEnabled(False)
+            self.banner_label.setText(error_msg)
+            self.banner_frame.setVisible(True)
+            self.status_label.setStyleSheet(
+                "color: #d32f2f; font-size: 13px; font-weight: bold;"
+            )
+            self.status_label.setText(error_msg)
+            return False
 
     def _setup_menu(self) -> None:
         menu_bar = self.menuBar()

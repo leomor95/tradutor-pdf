@@ -175,3 +175,40 @@ class OllamaClient:
                 )
 
         return device
+
+
+def check_service_health(
+    host: str | None = None,
+    model: str | None = None,
+) -> tuple[bool, str]:
+    """Check Ollama service status and model presence.
+
+    Returns:
+        (True, "") if healthy.
+        (False, actionable_error_message) if Ollama is not running or model is missing.
+    """
+    client = OllamaClient(host=host, default_model=model or "")
+    try:
+        models = client.list_models()
+    except (OllamaConnectionError, httpx.RequestError):
+        return False, (
+            "O serviço de tradução local (Ollama) não está em execução. "
+            "Execute `./scripts/run.sh` no terminal para iniciar o serviço."
+        )
+    except Exception as exc:  # noqa: BLE001
+        return False, (
+            f"Não foi possível conectar ao Ollama ({exc}). "
+            "Verifique se o serviço local está ativo via `./scripts/run.sh`."
+        )
+
+    if model:
+        has_model = any(
+            m == model or (m and m.split(":")[0] == model.split(":")[0]) for m in models
+        )
+        if not has_model:
+            return False, (
+                f"O modelo '{model}' não está instalado no Ollama local. "
+                "Execute `./scripts/setup.sh` no terminal para baixar o modelo configurado."
+            )
+
+    return True, ""

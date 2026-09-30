@@ -41,7 +41,7 @@ class StubTranslator(Translator):
 
 
 def test_main_window_initial_state(qtbot):
-    window = MainWindow()
+    window = MainWindow(health_checker=lambda: (True, ""))
     qtbot.addWidget(window)
 
     assert "Tradutor de PDF" in window.windowTitle()
@@ -262,3 +262,95 @@ def test_main_window_cancel_and_resume(qtbot, tmp_path: Path):
     assert window.btn_resume.isHidden()
     if window.current_worker:
         window.current_worker.wait(5000)
+
+
+def test_main_window_health_check_ollama_down(qtbot):
+    msg = "O serviço de tradução local (Ollama) não está em execução. Execute `./scripts/run.sh` no terminal para iniciar o serviço."
+    window = MainWindow(health_checker=lambda: (False, msg))
+    qtbot.addWidget(window)
+    window.show()
+
+    assert not window.drop_area.isEnabled()
+    assert not window.banner_frame.isHidden()
+    assert "não está em execução" in window.status_label.text()
+    assert "`./scripts/run.sh`" in window.banner_label.text()
+
+
+def test_main_window_health_check_model_missing(qtbot):
+    msg = "O modelo 'qwen2.5:7b' não está instalado no Ollama local. Execute `./scripts/setup.sh` no terminal para baixar o modelo configurado."
+    window = MainWindow(health_checker=lambda: (False, msg))
+    qtbot.addWidget(window)
+    window.show()
+
+    assert not window.drop_area.isEnabled()
+    assert not window.banner_frame.isHidden()
+    assert "não está instalado" in window.status_label.text()
+    assert "`./scripts/setup.sh`" in window.banner_label.text()
+
+
+def test_main_window_health_check_retry(qtbot):
+    state = {"healthy": False}
+
+    def checker():
+        if state["healthy"]:
+            return True, ""
+        return False, "Erro temporário"
+
+    window = MainWindow(health_checker=checker)
+    qtbot.addWidget(window)
+    window.show()
+
+    assert not window.drop_area.isEnabled()
+    assert not window.banner_frame.isHidden()
+
+    # Make healthy and click retry
+    state["healthy"] = True
+    window.btn_retry_health.click()
+
+    assert window.drop_area.isEnabled()
+    assert window.banner_frame.isHidden()
+    assert "Pronto para traduzir" in window.status_label.text()
+
+
+def test_check_service_health_function(monkeypatch):
+    from tradutor_pdf.translation.ollama_client import check_service_health
+
+    # 1. Connection error
+    def mock_list_models_conn_err(self):
+        from tradutor_pdf.translation.ollama_client import OllamaConnectionError
+
+        raise OllamaConnectionError("Connection refused")
+
+    monkeypatch.setattr(
+        "tradutor_pdf.translation.ollama_client.OllamaClient.list_models",
+        mock_list_models_conn_err,
+    )
+    ok, err = check_service_health()
+    assert not ok
+    assert "não está em execução" in err
+    assert "scripts/run.sh" in err
+
+    # 2. Model missing
+    def mock_list_models_ok(self):
+        return ["llama3:latest", "mistral:7b"]
+
+    monkeypatch.setattr(
+        "tradutor_pdf.translation.ollama_client.OllamaClient.list_models",
+        mock_list_models_ok,
+    )
+    ok, err = check_service_health(model="qwen2.5:7b-instruct-q4_K_M")
+    assert not ok
+    assert "não está instalado" in err
+    assert "scripts/setup.sh" in err
+
+    # 3. Model present
+    def mock_list_models_has_model(self):
+        return ["qwen2.5:7b-instruct-q4_K_M", "other:latest"]
+
+    monkeypatch.setattr(
+        "tradutor_pdf.translation.ollama_client.OllamaClient.list_models",
+        mock_list_models_has_model,
+    )
+    ok, err = check_service_health(model="qwen2.5:7b-instruct-q4_K_M")
+    assert ok
+    assert err == ""
