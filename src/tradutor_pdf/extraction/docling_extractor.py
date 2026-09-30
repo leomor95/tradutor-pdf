@@ -18,6 +18,7 @@ from docling_core.types.doc.labels import DocItemLabel
 
 from tradutor_pdf.assembly.markdown import get_default_output_path
 from tradutor_pdf.config import find_project_root
+from tradutor_pdf.extraction.cleaner import clean_blocks
 from tradutor_pdf.extraction.detection import detect_pages_needing_ocr
 from tradutor_pdf.pipeline import Block, BlockType, Extractor
 
@@ -359,13 +360,15 @@ class DoclingExtractor(Extractor):
             blocks.extend(sub_blocks)
             cur_idx += len(sub_blocks)
 
+        cleaned_blocks = clean_blocks(blocks)
         logger.info(
-            "Extracted %d total blocks for page range %s from %s",
+            "Extracted %d total blocks for page range %s from %s (cleaned: %d)",
             len(blocks),
             pages,
             source.name,
+            len(cleaned_blocks),
         )
-        return blocks
+        return cleaned_blocks
 
     def iter_windows(
         self,
@@ -438,9 +441,11 @@ class DoclingExtractor(Extractor):
         ):
             all_blocks.extend(window_blocks)
 
+        cleaned_all = clean_blocks(all_blocks)
         logger.info(
-            "Extracted %d total blocks across all windows from %s",
+            "Extracted %d total blocks across all windows from %s (cleaned: %d)",
             len(all_blocks),
             source.name,
+            len(cleaned_all),
         )
-        return all_blocks
+        return cleaned_all
