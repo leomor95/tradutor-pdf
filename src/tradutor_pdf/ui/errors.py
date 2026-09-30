@@ -133,6 +133,8 @@ def classify_error(exc: Exception | str) -> FormattedError:
         isinstance(exc, OSError) and getattr(exc, "errno", None) == errno.ENOSPC
     ) or (
         "no space left on device" in err_lower
+        or "disk full" in err_lower
+        or "out of disk space" in err_lower
         or "espaço insuficiente" in err_lower
         or "disco cheio" in err_lower
     )
