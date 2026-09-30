@@ -1,5 +1,3 @@
-import pytest
-
 from tradutor_pdf.pipeline import Block, BlockType, Chunk, Translator
 from tradutor_pdf.translation.ollama_client import OllamaError
 from tradutor_pdf.translation.translator import (
@@ -75,14 +73,48 @@ def test_translate_non_translatable_chunk(fake_llm):
 
 def test_translate_error_handling(fake_llm):
     fake_llm.should_fail = OllamaError("Connection timed out")
-    translator = OllamaTranslator(client=fake_llm)
+    translator = OllamaTranslator(client=fake_llm, max_retries=3)
     chunk = Chunk(id="c4", original_text="Some text to translate")
 
-    with pytest.raises(OllamaError):
-        translator.translate(chunk)
-
+    res = translator.translate(chunk)
+    assert res.startswith("<!-- NÃO TRADUZIDO -->")
+    assert "Some text to translate" in res
     assert chunk.status == "error"
     assert "Connection timed out" in chunk.error_message
+
+
+def test_translate_retry_succeeds_after_validation_failure(fake_llm):
+    # Attempt 1: chat preamble (fails validator)
+    # Attempt 2: clean translation (succeeds)
+    fake_llm.queue_responses(
+        "Aqui está a tradução:\n# Introdução\n\nTexto traduzido.",
+        "# Introdução\n\nTexto traduzido.",
+    )
+    translator = OllamaTranslator(client=fake_llm, max_retries=3)
+    chunk = Chunk(id="c_retry", original_text="# Introduction\n\nTranslated text.")
+
+    res = translator.translate(chunk)
+    assert res == "# Introdução\n\nTexto traduzido."
+    assert chunk.status == "translated"
+    assert len(fake_llm.calls) == 2
+
+
+def test_translate_all_retries_fail_validation_fallback(fake_llm):
+    # All 3 attempts return chat preambles
+    fake_llm.queue_responses(
+        "Aqui está a tradução 1:\n# Introdução\n\nTexto.",
+        "Aqui está a tradução 2:\n# Introdução\n\nTexto.",
+        "Aqui está a tradução 3:\n# Introdução\n\nTexto.",
+    )
+    translator = OllamaTranslator(client=fake_llm, max_retries=3)
+    chunk = Chunk(id="c_fail", original_text="# Introduction\n\nTranslated text.")
+
+    res = translator.translate(chunk)
+    assert res.startswith("<!-- NÃO TRADUZIDO -->")
+    assert "# Introduction\n\nTranslated text." in res
+    assert chunk.status == "error"
+    assert "Validation failed" in chunk.error_message
+    assert len(fake_llm.calls) == 3
 
 
 def test_translate_with_glossary_filtering_and_correction(fake_llm):

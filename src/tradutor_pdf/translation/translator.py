@@ -17,6 +17,9 @@ from tradutor_pdf.translation.prompt import (
     build_translation_prompt,
     get_system_prompt,
 )
+from tradutor_pdf.translation.validator import (
+    TranslationValidator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +41,7 @@ def strip_code_fence_wrapper(text: str) -> str:
 
 
 class OllamaTranslator(Translator):
-    """Translates chunks using a local Ollama model with glossary, context, and validation."""
+    """Translates chunks using a local Ollama model with glossary, context, validation, and retries."""
 
     def __init__(
         self,
@@ -47,12 +50,16 @@ class OllamaTranslator(Translator):
         target_language: str = "pt-BR",
         temperature: float = 0.2,
         glossary: GlossaryConfig | None = None,
+        max_retries: int = 3,
+        validator: TranslationValidator | None = None,
     ) -> None:
         self.client = client or OllamaClient()
         self.model = model or self.client.default_model
         self.target_language = target_language
         self.temperature = temperature
         self.glossary = glossary if glossary is not None else load_glossary()
+        self.max_retries = max(1, max_retries)
+        self.validator = validator or TranslationValidator()
         self._last_original: str | None = None
         self._last_translation: str | None = None
 
@@ -106,34 +113,75 @@ class OllamaTranslator(Translator):
 
         system_prompt = get_system_prompt(self.target_language)
 
-        logger.info(
-            "Translating chunk %s (%d tokens) with model %s (glossary terms: %d preserve, %d translate)",
-            chunk.id,
-            chunk.token_count,
-            self.model,
-            len(app_preserve),
-            len(app_trans),
-        )
+        last_error: str | None = None
 
-        try:
-            response = self.client.generate(
-                prompt=prompt,
-                model=self.model,
-                system=system_prompt,
-                temperature=self.temperature,
+        for attempt in range(1, self.max_retries + 1):
+            logger.info(
+                "Translating chunk %s (attempt %d/%d, %d tokens) with model %s",
+                chunk.id,
+                attempt,
+                self.max_retries,
+                chunk.token_count,
+                self.model,
             )
-            cleaned = strip_code_fence_wrapper(response)
-            restored = restore_placeholders(cleaned, placeholders)
-            corrected = verify_and_correct_translation(
-                restored, chunk.original_text, self.glossary
-            )
-            chunk.translated_text = corrected
-            chunk.status = "translated"
-            self._last_original = chunk.original_text
-            self._last_translation = corrected
-            return corrected
-        except Exception as exc:
-            chunk.status = "error"
-            chunk.error_message = str(exc)
-            logger.error("Failed to translate chunk %s: %s", chunk.id, exc)
-            raise
+
+            try:
+                response = self.client.generate(
+                    prompt=prompt,
+                    model=self.model,
+                    system=system_prompt,
+                    temperature=self.temperature,
+                )
+                cleaned = strip_code_fence_wrapper(response)
+                validation = self.validator.validate(
+                    raw_response=cleaned,
+                    original_text=protected_text,
+                    placeholders=placeholders,
+                )
+                if not validation.is_valid:
+                    reasons_str = "; ".join(validation.reasons)
+                    logger.warning(
+                        "Chunk %s attempt %d/%d failed validation: %s",
+                        chunk.id,
+                        attempt,
+                        self.max_retries,
+                        reasons_str,
+                    )
+                    last_error = f"Validation failed: {reasons_str}"
+                    continue
+
+                restored = restore_placeholders(cleaned, placeholders)
+                corrected = verify_and_correct_translation(
+                    restored, chunk.original_text, self.glossary
+                )
+                chunk.translated_text = corrected
+                chunk.status = "translated"
+                chunk.error_message = None
+                self._last_original = chunk.original_text
+                self._last_translation = corrected
+                return corrected
+
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Chunk %s attempt %d/%d failed with exception: %s",
+                    chunk.id,
+                    attempt,
+                    self.max_retries,
+                    exc,
+                )
+                last_error = str(exc)
+
+        # All attempts failed
+        logger.error(
+            "All %d attempts failed for chunk %s (%s). Falling back to original marked with <!-- NÃO TRADUZIDO -->.",
+            self.max_retries,
+            chunk.id,
+            last_error,
+        )
+        fallback = f"<!-- NÃO TRADUZIDO -->\n\n{chunk.original_text}"
+        chunk.translated_text = fallback
+        chunk.status = "error"
+        chunk.error_message = (
+            last_error or f"Translation failed after {self.max_retries} attempts"
+        )
+        return fallback
