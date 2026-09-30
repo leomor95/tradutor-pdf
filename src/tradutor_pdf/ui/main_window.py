@@ -12,12 +12,16 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from tradutor_pdf.checkpoint.store import CheckpointStore
+from tradutor_pdf.config import load_settings
+from tradutor_pdf.translation.prompt import PROMPT_VERSION
 from tradutor_pdf.ui.worker import TranslationWorker
 
 logger = logging.getLogger(__name__)
@@ -169,6 +173,29 @@ class MainWindow(QMainWindow):
             logger.warning("Translation already in progress. Ignoring new request.")
             return
 
+        checkpoint_store = CheckpointStore()
+        on_conflict = "reuse"
+        if checkpoint_store.has_checkpoint(pdf_path):
+            manifest = checkpoint_store.load_manifest(pdf_path)
+            settings = load_settings()
+            if manifest and (
+                manifest.model != settings.translation.model
+                or manifest.prompt_version != PROMPT_VERSION
+            ):
+                reply = QMessageBox.question(
+                    self,
+                    "Configuração alterada",
+                    "O modelo ou a versão do prompt foram alterados desde a última execução.\n\n"
+                    f"Modelo salvo: {manifest.model}\n"
+                    f"Modelo atual: {settings.translation.model}\n\n"
+                    "Deseja reaproveitar os trechos já traduzidos ou reiniciar a tradução do zero?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if reply == QMessageBox.StandardButton.No:
+                    on_conflict = "restart"
+                    checkpoint_store.clear(pdf_path)
+
         logger.info("Initiating translation for %s", pdf_path)
         self.drop_area.setEnabled(False)
         self.progress_bar.setValue(0)
@@ -178,7 +205,11 @@ class MainWindow(QMainWindow):
         if self.worker_factory:
             self.current_worker = self.worker_factory(pdf_path)
         else:
-            self.current_worker = TranslationWorker(source_path=pdf_path)
+            self.current_worker = TranslationWorker(
+                source_path=pdf_path,
+                checkpoint_store=checkpoint_store,
+                on_conflict=on_conflict,
+            )
 
         self.current_worker.progress.connect(self._on_progress)
         self.current_worker.status_changed.connect(self._on_status_changed)

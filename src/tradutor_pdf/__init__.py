@@ -16,8 +16,12 @@ from tradutor_pdf.assembly.markdown import (
     MarkdownAssembler,
     get_default_output_path,
 )
+from tradutor_pdf.checkpoint.store import CheckpointStore
 from tradutor_pdf.config import Settings, load_settings
-from tradutor_pdf.extraction.docling_extractor import DoclingExtractor
+from tradutor_pdf.extraction.docling_extractor import (
+    DoclingExtractor,
+    get_pdf_page_count,
+)
 from tradutor_pdf.logging_setup import setup_logging, timed_stage
 from tradutor_pdf.pipeline import (
     Assembler,
@@ -27,6 +31,7 @@ from tradutor_pdf.pipeline import (
     Translator,
 )
 from tradutor_pdf.segmentation.semantic import SemanticSegmenter
+from tradutor_pdf.translation.prompt import PROMPT_VERSION
 from tradutor_pdf.translation.translator import OllamaTranslator
 
 logger = logging.getLogger("tradutor_pdf")
@@ -40,8 +45,10 @@ def run_cli(
     segmenter: Segmenter | None = None,
     translator: Translator | None = None,
     assembler: Assembler | None = None,
+    checkpoint_store: CheckpointStore | None = None,
+    on_conflict: str = "ask",
 ) -> Path:
-    """Execute the full translation pipeline in CLI mode."""
+    """Execute the full translation pipeline in CLI mode with checkpointing and resumption."""
     source = Path(pdf_path)
     if not source.is_file():
         raise FileNotFoundError(f"Arquivo PDF não encontrado: {source}")
@@ -55,6 +62,50 @@ def run_cli(
         temperature=current_settings.translation.temperature,
     )
     current_assembler = assembler or MarkdownAssembler()
+    store = checkpoint_store or CheckpointStore()
+
+    total_pages = get_pdf_page_count(source)
+
+    # Checkpoint conflict detection
+    if store.has_checkpoint(source):
+        existing_manifest = store.load_manifest(source)
+        if existing_manifest:
+            model_changed = (
+                existing_manifest.model != current_settings.translation.model
+            )
+            prompt_changed = existing_manifest.prompt_version != PROMPT_VERSION
+            if model_changed or prompt_changed:
+                action = on_conflict
+                if action == "ask":
+                    if sys.stdin.isatty():
+                        resp = (
+                            input(
+                                f"[AVISO] O modelo ou a versão do prompt foram alterados desde a última execução.\n"
+                                f"Modelo salvo: {existing_manifest.model} (atual: {current_settings.translation.model})\n"
+                                f"Deseja reaproveitar os trechos já traduzidos? [S/n]: "
+                            )
+                            .strip()
+                            .lower()
+                        )
+                        action = "restart" if resp.startswith("n") else "reuse"
+                    else:
+                        action = "reuse"
+
+                if action == "restart":
+                    print(
+                        "[INFO] Reiniciando tradução a partir do zero conforme solicitado."
+                    )
+                    store.clear(source)
+                else:
+                    print("[INFO] Reaproveitando trechos já traduzidos do checkpoint.")
+
+    store.init_manifest(
+        source_path=source,
+        total_pages=total_pages,
+        model=current_settings.translation.model,
+        prompt_version=PROMPT_VERSION,
+        target_language=current_settings.translation.target_language,
+    )
 
     with timed_stage("Extração"):
         blocks = current_extractor.extract(source)
@@ -67,12 +118,34 @@ def run_cli(
     total_chunks = len(chunks)
     print(f"[INFO] Documento dividido em {total_chunks} trechos para tradução.")
 
+    dest = output_path or get_default_output_path(source)
+
+    # Sync any previously translated chunks
+    completed_chunks = 0
+    for chunk in chunks:
+        if store.is_chunk_completed(source, chunk.id):
+            chunk.translated_text = store.load_chunk_translation(source, chunk.id)
+            chunk.status = "translated"
+            completed_chunks += 1
+
+    if completed_chunks > 0 and hasattr(current_assembler, "sync_incremental"):
+        ready_chunks = [c for c in chunks if store.is_chunk_completed(source, c.id)]
+        current_assembler.sync_incremental(ready_chunks, dest)
+        print(
+            f"[INFO] Checkpoint retomado: {completed_chunks}/{total_chunks} trechos já concluídos."
+        )
+
     with timed_stage("Tradução"):
         prev_chunk: Chunk | None = None
         for idx, chunk in enumerate(chunks):
             page_info = f"pág. {chunk.page_start}"
             if chunk.page_start != chunk.page_end:
                 page_info = f"págs. {chunk.page_start}-{chunk.page_end}"
+
+            if store.is_chunk_completed(source, chunk.id):
+                if chunk.status == "translated":
+                    prev_chunk = chunk
+                continue
 
             print(f"[INFO] Traduzindo trecho {idx + 1}/{total_chunks} ({page_info})...")
             prev_context = (
@@ -81,12 +154,20 @@ def run_cli(
                 else None
             )
             current_translator.translate(chunk, previous_context=prev_context)
+
+            # Persist chunk to checkpoint
+            store.save_chunk(source, chunk, index=idx)
+
+            # Append chunk incrementally to Markdown output
+            if hasattr(current_assembler, "append_chunk"):
+                current_assembler.append_chunk(chunk, dest)
+
             if chunk.status == "translated":
                 prev_chunk = chunk
 
-    dest = output_path or get_default_output_path(source)
     with timed_stage("Montagem"):
         final_path = current_assembler.assemble(chunks, dest)
+        store.mark_completed(source)
 
     return final_path
 
@@ -112,6 +193,11 @@ def main(argv: list[str] | None = None) -> int:
         metavar="SAIDA.md",
         help="Caminho do arquivo Markdown de saída (opcional).",
     )
+    parser.add_argument(
+        "--restart",
+        action="store_true",
+        help="Ignora qualquer checkpoint existente e reinicia a tradução do zero.",
+    )
 
     args = parser.parse_args(argv)
     log = setup_logging()
@@ -119,7 +205,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.cli:
         log.info("Executando tradução em modo CLI para %s", args.cli)
         try:
-            out_path = run_cli(args.cli, output_path=args.output)
+            on_conflict = "restart" if args.restart else "ask"
+            out_path = run_cli(
+                args.cli,
+                output_path=args.output,
+                on_conflict=on_conflict,
+            )
             print(f"[OK] Tradução concluída com sucesso: {out_path}")
             return 0
         except Exception as exc:

@@ -75,6 +75,7 @@ class SemanticSegmenter(Segmenter):
         self,
         blocks: list[Block],
         max_tokens: int = 800,
+        start_chunk_idx: int = 0,
     ) -> list[Chunk]:
         if not blocks:
             return []
@@ -87,7 +88,7 @@ class SemanticSegmenter(Segmenter):
         chunks: list[Chunk] = []
         current_translatable_blocks: list[Block] = []
         current_tokens = 0
-        chunk_idx = 0
+        chunk_idx = start_chunk_idx
 
         def flush_translatable() -> None:
             nonlocal chunk_idx, current_translatable_blocks, current_tokens
