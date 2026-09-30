@@ -59,7 +59,9 @@ def test_main_cli_mode(tmp_path: Path):
     with patch("tradutor_pdf.run_cli", return_value=output_md) as mock_run_cli:
         ret = main(["--cli", str(dummy_pdf), "-o", str(output_md)])
         assert ret == 0
-        mock_run_cli.assert_called_once_with(dummy_pdf, output_path=output_md)
+        mock_run_cli.assert_called_once_with(
+            dummy_pdf, output_path=output_md, on_conflict="ask"
+        )
 
 
 def test_main_cli_missing_file_returns_error(tmp_path: Path):

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from fpdf import FPDF
 
 from tradutor_pdf import run_cli
@@ -182,3 +183,62 @@ def test_resume_conflict_restart_vs_reuse(tmp_path: Path):
     text = out_file.read_text(encoding="utf-8")
     assert "Old Translation" not in text
     assert "Restart: " in text
+
+
+def test_resume_interrupted_run_and_continue(tmp_path: Path):
+    pdf_path = create_multipage_pdf(tmp_path / "interrupt_test.pdf", pages=3)
+    cache_dir = tmp_path / ".cache"
+    store = CheckpointStore(base_cache_dir=cache_dir)
+    out_file = tmp_path / "interrupted_out.md"
+
+    # Translator that translates 1 chunk then raises exception to simulate kill/crash
+    class InterruptingTranslator(Translator):
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def translate(
+            self,
+            chunk: Chunk,
+            previous_context: str | tuple[str, str] | None = None,
+        ) -> str:
+            self.call_count += 1
+            if self.call_count > 1:
+                raise KeyboardInterrupt("Simulated process kill")
+            chunk.translated_text = f"Part 1: {chunk.original_text}"
+            chunk.status = "translated"
+            return chunk.translated_text
+
+    # First run fails mid-way
+    with pytest.raises(KeyboardInterrupt):
+        run_cli(
+            pdf_path=pdf_path,
+            output_path=out_file,
+            settings=Settings(translation=TranslationConfig(chunk_max_tokens=60)),
+            translator=InterruptingTranslator(),
+            checkpoint_store=store,
+            on_conflict="reuse",
+        )
+
+    # First chunk is in checkpoint
+    assert store.has_checkpoint(pdf_path)
+    manifest = store.load_manifest(pdf_path)
+    assert manifest is not None
+    assert manifest.status == "in_progress"
+
+    # Second run resumes cleanly
+    resuming_translator = CountingTranslator(prefix="Resumed: ")
+    run_cli(
+        pdf_path=pdf_path,
+        output_path=out_file,
+        settings=Settings(translation=TranslationConfig(chunk_max_tokens=60)),
+        translator=resuming_translator,
+        checkpoint_store=store,
+        on_conflict="reuse",
+    )
+
+    # Verify no chunk was translated twice
+    assert "chunk-0" not in resuming_translator.translated_chunk_ids
+    assert out_file.is_file()
+    final_text = out_file.read_text(encoding="utf-8")
+    assert "Part 1: " in final_text
+    assert "Resumed: " in final_text

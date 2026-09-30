@@ -74,3 +74,14 @@ class FakeOllamaClient:
 def fake_llm() -> FakeOllamaClient:
     """Fixture providing a controllable fake Ollama client."""
     return FakeOllamaClient()
+
+
+@pytest.fixture(autouse=True)
+def isolate_test_cache(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure every test has its own isolated cache directory."""
+    cache_dir = tmp_path_factory.mktemp("test_env") / ".cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("TRADUTOR_CACHE_DIR", str(cache_dir))
