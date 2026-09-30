@@ -9,8 +9,10 @@ requires-python = ">=3.12"
 dependencies = [
     "docling>=2.131.0",
     "httpx>=0.28.1",
+    "pypandoc-binary>=1.17",
     "pyside6>=6.11.2",
     "pyyaml>=6.0.3",
+    "typst>=0.15.0",
 ]
 
 [project.scripts]

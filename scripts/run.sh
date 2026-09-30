@@ -15,6 +15,12 @@ if [ -d "$ROOT_DIR/bin/tessdata" ]; then
     export TESSDATA_PREFIX="${TESSDATA_PREFIX:-$ROOT_DIR/bin/tessdata}"
 fi
 
+if [ -d "$ROOT_DIR/bin/jre/bin" ]; then
+    export PATH="$ROOT_DIR/bin/jre/bin:$ROOT_DIR/bin:$PATH"
+elif [ -d "$ROOT_DIR/bin" ]; then
+    export PATH="$ROOT_DIR/bin:$PATH"
+fi
+
 mkdir -p "$OLLAMA_MODELS" "$XDG_CACHE_HOME" "$HF_HOME" "$UV_CACHE_DIR" "$ROOT_DIR/logs"
 
 # Start Ollama local server if not already running

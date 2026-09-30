@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "=== [1/5] Verificando pré-requisitos do sistema ==="
+echo "=== [1/6] Verificando pré-requisitos do sistema ==="
 
 # 1. Tesseract
 if ! command -v tesseract >/dev/null 2>&1; then
@@ -80,13 +80,13 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 echo "[OK] uv encontrado: $(uv --version)"
 
-echo "=== [2/5] Sincronizando dependências Python com uv ==="
+echo "=== [2/6] Sincronizando dependências Python com uv ==="
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$ROOT_DIR/.cache/uv}"
 mkdir -p "$UV_CACHE_DIR"
 (cd "$ROOT_DIR" && uv sync)
 echo "[OK] Ambiente Python sincronizado em .venv/"
 
-echo "=== [3/5] Verificando binário do Ollama ==="
+echo "=== [3/6] Verificando binário do Ollama ==="
 mkdir -p "$ROOT_DIR/bin" "$ROOT_DIR/logs" "$ROOT_DIR/models" "$ROOT_DIR/.cache"
 
 if [ -x "$ROOT_DIR/bin/ollama" ]; then
@@ -103,7 +103,61 @@ else
     echo "[OK] Ollama instalado com sucesso em bin/ollama"
 fi
 
-echo "=== [4/5] Determinando modelo configurado ==="
+echo "=== [4/6] Verificando epubcheck e ambiente Java isolado ==="
+if [ -x "$ROOT_DIR/bin/jre/bin/java" ]; then
+    echo "[OK] JRE isolada encontrada em bin/jre/"
+elif command -v java >/dev/null 2>&1; then
+    echo "[OK] Java encontrado no sistema: $(java -version 2>&1 | head -n 1)"
+else
+    echo "[INFO] Java não encontrado no sistema. Baixando JRE portátil (Temurin 21) para bin/jre/..."
+    mkdir -p "$ROOT_DIR/.cache" "$ROOT_DIR/bin/jre"
+    JRE_ARCHIVE="$ROOT_DIR/.cache/jre-temurin21.tar.gz"
+    curl -fsSL -o "$JRE_ARCHIVE" "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_x64_linux_hotspot_21.0.12.1_1.tar.gz"
+    tar -xzf "$JRE_ARCHIVE" -C "$ROOT_DIR/bin/jre" --strip-components=1
+    rm -f "$JRE_ARCHIVE"
+    echo "[OK] JRE portátil instalada com sucesso em bin/jre/"
+fi
+
+if [ -f "$ROOT_DIR/bin/epubcheck-pkg/epubcheck.jar" ]; then
+    echo "[OK] epubcheck.jar já instalado em bin/epubcheck-pkg/"
+else
+    echo "[INFO] Baixando epubcheck para bin/..."
+    mkdir -p "$ROOT_DIR/.cache" "$ROOT_DIR/bin"
+    EPUBCHECK_ZIP="$ROOT_DIR/.cache/epubcheck.zip"
+    curl -fsSL -o "$EPUBCHECK_ZIP" "https://github.com/w3c/epubcheck/releases/download/v5.2.1/epubcheck-5.2.1.zip"
+    unzip -q "$EPUBCHECK_ZIP" -d "$ROOT_DIR/bin/"
+    rm -rf "$ROOT_DIR/bin/epubcheck-pkg"
+    mv "$ROOT_DIR/bin/epubcheck-5.2.1" "$ROOT_DIR/bin/epubcheck-pkg"
+    rm -f "$EPUBCHECK_ZIP"
+    echo "[OK] epubcheck descompactado com sucesso em bin/epubcheck-pkg/"
+fi
+
+cat << 'EOF' > "$ROOT_DIR/bin/epubcheck"
+#!/usr/bin/env bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [ -x "$ROOT_DIR/bin/jre/bin/java" ]; then
+    JAVA_CMD="$ROOT_DIR/bin/jre/bin/java"
+elif command -v java >/dev/null 2>&1; then
+    JAVA_CMD="java"
+else
+    echo "[ERRO] Java não encontrado. Execute ./scripts/setup.sh para baixar a JRE isolada." >&2
+    exit 1
+fi
+
+JAR_FILE="$ROOT_DIR/bin/epubcheck-pkg/epubcheck.jar"
+if [ ! -f "$JAR_FILE" ]; then
+    echo "[ERRO] epubcheck.jar não encontrado em $JAR_FILE. Execute ./scripts/setup.sh." >&2
+    exit 1
+fi
+
+exec "$JAVA_CMD" -jar "$JAR_FILE" "$@"
+EOF
+chmod +x "$ROOT_DIR/bin/epubcheck"
+echo "[OK] bin/epubcheck configurado: $("$ROOT_DIR/bin/epubcheck" --version 2>&1)"
+
+echo "=== [5/6] Determinando modelo configurado ==="
 MODEL="qwen2.5:7b-instruct-q4_K_M"
 SETTINGS_FILE="$ROOT_DIR/config/settings.toml"
 if [ -f "$SETTINGS_FILE" ]; then
@@ -114,7 +168,7 @@ if [ -f "$SETTINGS_FILE" ]; then
 fi
 echo "[INFO] Modelo configurado: $MODEL"
 
-echo "=== [5/5] Verificando e baixando modelo no Ollama ==="
+echo "=== [6/6] Verificando e baixando modelo no Ollama ==="
 export OLLAMA_MODELS="$ROOT_DIR/models"
 export OLLAMA_HOST="127.0.0.1:11434"
 
