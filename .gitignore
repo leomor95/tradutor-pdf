@@ -1,1 +1,20 @@
 /docs
+
+# Project-local runtime directories (RNF24)
+.venv/
+bin/
+models/
+.cache/
+logs/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
