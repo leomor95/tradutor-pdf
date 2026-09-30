@@ -86,3 +86,27 @@ def test_main_gui_mode():
         assert ret == 0
         mock_window.show.assert_called_once()
         mock_app.exec.assert_called_once()
+
+
+def test_main_cli_convert_success(tmp_path: Path):
+    md_file = tmp_path / "test.md"
+    md_file.write_text("# Hello\n\nWord", encoding="utf-8")
+    out_pdf = tmp_path / "test.pdf"
+
+    with patch(
+        "tradutor_pdf.export.converter.DocumentConverter.convert", return_value=out_pdf
+    ) as mock_convert:
+        ret = main(["--convert", str(md_file), "--to", "pdf", "-o", str(out_pdf)])
+        assert ret == 0
+        mock_convert.assert_called_once_with(
+            input_path=md_file,
+            target_format="pdf",
+            destination=out_pdf,
+        )
+
+
+def test_main_cli_convert_missing_to(tmp_path: Path):
+    md_file = tmp_path / "test.md"
+    md_file.write_text("# Hello", encoding="utf-8")
+    ret = main(["--convert", str(md_file)])
+    assert ret == 1

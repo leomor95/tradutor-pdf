@@ -5,22 +5,28 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
     QFileDialog,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QRadioButton,
     QVBoxLayout,
     QWidget,
 )
 
 from tradutor_pdf.checkpoint.store import CheckpointStore
 from tradutor_pdf.config import load_settings
+from tradutor_pdf.export.converter import DocumentConverter
 from tradutor_pdf.translation.prompt import PROMPT_VERSION
 from tradutor_pdf.ui.worker import TranslationWorker
 
@@ -119,20 +125,263 @@ class DropArea(QFrame):
                 self.file_dropped.emit(path)
 
 
+class ExportDialog(QDialog):
+    """Dialog allowing user to choose export format (MD, PDF, EPUB) and destination directory."""
+
+    def __init__(
+        self,
+        markdown_path: Path,
+        default_dir: Path | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.markdown_path = Path(markdown_path)
+        self.exported_path: Path | None = None
+
+        self.setWindowTitle("Exportar Tradução")
+        self.resize(520, 260)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        info_lbl = QLabel(
+            "A tradução foi concluída! Escolha o formato final e a pasta de destino:"
+        )
+        info_lbl.setWordWrap(True)
+        layout.addWidget(info_lbl)
+
+        # Formats
+        form_group = QGroupBox("Formato de Saída", self)
+        form_layout = QVBoxLayout(form_group)
+        self.rb_pdf = QRadioButton(
+            "PDF (.pdf) — Documento formatado para leitura e impressão"
+        )
+        self.rb_epub = QRadioButton(
+            "EPUB (.epub) — Livro digital com sumário navegável"
+        )
+        self.rb_md = QRadioButton(
+            "Markdown (.md) — Texto original com pasta de imagens"
+        )
+        self.rb_pdf.setChecked(True)
+        form_layout.addWidget(self.rb_pdf)
+        form_layout.addWidget(self.rb_epub)
+        form_layout.addWidget(self.rb_md)
+        layout.addWidget(form_group)
+
+        # Destination folder
+        dest_group = QGroupBox("Pasta de Destino", self)
+        dest_layout = QHBoxLayout(dest_group)
+        settings = load_settings()
+        initial_dir = default_dir or Path(settings.output.default_dir).expanduser()
+        self.dest_edit = QLineEdit(str(initial_dir))
+        self.btn_browse = QPushButton("Procurar…")
+        self.btn_browse.clicked.connect(self._browse_destination)
+        dest_layout.addWidget(self.dest_edit)
+        dest_layout.addWidget(self.btn_browse)
+        layout.addWidget(dest_group)
+
+        # Action buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.btn_cancel = QPushButton("Manter apenas Markdown")
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_export = QPushButton("Exportar")
+        self.btn_export.setDefault(True)
+        self.btn_export.setStyleSheet("font-weight: bold;")
+        self.btn_export.clicked.connect(self._do_export)
+        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(self.btn_export)
+        layout.addLayout(btn_layout)
+
+    def _browse_destination(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Selecionar pasta de destino",
+            self.dest_edit.text() or "",
+        )
+        if folder:
+            self.dest_edit.setText(folder)
+
+    def _do_export(self) -> None:
+        dest_text = self.dest_edit.text().strip()
+        target_dir = (
+            Path(dest_text).expanduser() if dest_text else self.markdown_path.parent
+        )
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            QMessageBox.critical(
+                self, "Erro", f"Não foi possível criar a pasta de destino:\n{exc}"
+            )
+            return
+
+        fmt = "pdf"
+        if self.rb_epub.isChecked():
+            fmt = "epub"
+        elif self.rb_md.isChecked():
+            fmt = "md"
+
+        try:
+            converter = DocumentConverter()
+            self.exported_path = converter.convert(
+                input_path=self.markdown_path,
+                target_format=fmt,
+                destination=target_dir,
+            )
+            self.accept()
+        except (RuntimeError, ValueError, OSError) as exc:
+            logger.exception("Export failed")
+            QMessageBox.critical(
+                self, "Erro na Exportação", f"Falha ao exportar documento:\n{exc}"
+            )
+
+
+class ConversionDialog(QDialog):
+    """Dialog for converting documents between PDF, MD, and EPUB without translation."""
+
+    def __init__(
+        self,
+        default_dir: Path | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.converted_path: Path | None = None
+        self.setWindowTitle("Converter Arquivo")
+        self.resize(520, 260)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        # Source file
+        src_group = QGroupBox("Arquivo de Origem", self)
+        src_layout = QHBoxLayout(src_group)
+        self.src_edit = QLineEdit()
+        self.src_edit.setPlaceholderText(
+            "Selecione um arquivo PDF, EPUB ou Markdown..."
+        )
+        self.btn_browse_src = QPushButton("Selecionar…")
+        self.btn_browse_src.clicked.connect(self._browse_source)
+        src_layout.addWidget(self.src_edit)
+        src_layout.addWidget(self.btn_browse_src)
+        layout.addWidget(src_group)
+
+        # Target format
+        fmt_group = QGroupBox("Formato de Destino", self)
+        fmt_layout = QHBoxLayout(fmt_group)
+        self.combo_format = QComboBox()
+        self.combo_format.addItems(
+            [
+                "Markdown (.md)",
+                "PDF (.pdf)",
+                "EPUB (.epub)",
+            ]
+        )
+        fmt_layout.addWidget(self.combo_format)
+        layout.addWidget(fmt_group)
+
+        # Destination folder
+        dest_group = QGroupBox("Pasta de Destino", self)
+        dest_layout = QHBoxLayout(dest_group)
+        settings = load_settings()
+        initial_dir = default_dir or Path(settings.output.default_dir).expanduser()
+        self.dest_edit = QLineEdit(str(initial_dir))
+        self.btn_browse_dest = QPushButton("Procurar…")
+        self.btn_browse_dest.clicked.connect(self._browse_destination)
+        dest_layout.addWidget(self.dest_edit)
+        dest_layout.addWidget(self.btn_browse_dest)
+        layout.addWidget(dest_group)
+
+        # Action buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.btn_cancel = QPushButton("Cancelar")
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_convert = QPushButton("Converter")
+        self.btn_convert.setDefault(True)
+        self.btn_convert.setStyleSheet("font-weight: bold;")
+        self.btn_convert.clicked.connect(self._do_convert)
+        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(self.btn_convert)
+        layout.addLayout(btn_layout)
+
+    def _browse_source(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Selecionar arquivo para conversão",
+            "",
+            "Arquivos Suportados (*.pdf *.epub *.md *.markdown);;PDF (*.pdf);;EPUB (*.epub);;Markdown (*.md *.markdown)",
+        )
+        if file_path:
+            self.src_edit.setText(file_path)
+
+    def _browse_destination(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Selecionar pasta de destino",
+            self.dest_edit.text() or "",
+        )
+        if folder:
+            self.dest_edit.setText(folder)
+
+    def _do_convert(self) -> None:
+        src_path_str = self.src_edit.text().strip()
+        if not src_path_str:
+            QMessageBox.warning(self, "Aviso", "Selecione o arquivo de origem.")
+            return
+
+        source = Path(src_path_str)
+        if not source.is_file():
+            QMessageBox.critical(
+                self, "Erro", f"Arquivo de origem não encontrado:\n{source}"
+            )
+            return
+
+        dest_dir_str = self.dest_edit.text().strip()
+        target_dir = Path(dest_dir_str).expanduser() if dest_dir_str else source.parent
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        selected_text = self.combo_format.currentText()
+        if "PDF" in selected_text:
+            target_fmt = "pdf"
+        elif "EPUB" in selected_text:
+            target_fmt = "epub"
+        else:
+            target_fmt = "md"
+
+        try:
+            converter = DocumentConverter()
+            self.converted_path = converter.convert(
+                input_path=source,
+                target_format=target_fmt,
+                destination=target_dir,
+            )
+            self.accept()
+        except (RuntimeError, ValueError, OSError) as exc:
+            logger.exception("Conversion failed")
+            QMessageBox.critical(
+                self, "Erro na Conversão", f"Falha ao converter arquivo:\n{exc}"
+            )
+
+
 class MainWindow(QMainWindow):
     """Main application window for Tradutor de PDF."""
 
     def __init__(
         self,
         worker_factory: Callable[[Path], TranslationWorker] | None = None,
+        auto_prompt_export: bool = True,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.worker_factory = worker_factory
+        self.auto_prompt_export = auto_prompt_export
         self.current_worker: TranslationWorker | None = None
 
         self.setWindowTitle("Tradutor de PDF")
-        self.resize(620, 380)
+        self.resize(640, 420)
+
+        # Menu bar
+        self._setup_menu()
 
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
@@ -141,12 +390,20 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(20, 20, 20, 20)
         root_layout.setSpacing(15)
 
-        # Header title
+        # Top row: title + Converter button
+        top_layout = QHBoxLayout()
         self.header_label = QLabel("Tradutor de PDF (EN → pt-BR)")
         self.header_label.setStyleSheet(
             "font-size: 18px; font-weight: bold; color: #222222;"
         )
-        root_layout.addWidget(self.header_label)
+        top_layout.addWidget(self.header_label)
+        top_layout.addStretch()
+
+        self.btn_convert_dialog = QPushButton("Converter arquivo…")
+        self.btn_convert_dialog.setStyleSheet("padding: 5px 12px; font-size: 13px;")
+        self.btn_convert_dialog.clicked.connect(self._open_conversion_dialog)
+        top_layout.addWidget(self.btn_convert_dialog)
+        root_layout.addLayout(top_layout)
 
         # Drag and drop area
         self.drop_area = DropArea(self)
@@ -167,6 +424,45 @@ class MainWindow(QMainWindow):
         self.status_label.setStyleSheet("color: #444444; font-size: 13px;")
         status_layout.addWidget(self.status_label)
         root_layout.addLayout(status_layout)
+
+    def _setup_menu(self) -> None:
+        menu_bar = self.menuBar()
+        file_menu = menu_bar.addMenu("&Arquivo")
+
+        self.convert_action = QAction("&Converter arquivo…", self)
+        self.convert_action.setShortcut("Ctrl+K")
+        self.convert_action.triggered.connect(self._open_conversion_dialog)
+        file_menu.addAction(self.convert_action)
+
+        file_menu.addSeparator()
+
+        self.exit_action = QAction("&Sair", self)
+        self.exit_action.setShortcut("Ctrl+Q")
+        self.exit_action.triggered.connect(self.close)
+        file_menu.addAction(self.exit_action)
+
+    def _open_conversion_dialog(self) -> Path | None:
+        dialog = ConversionDialog(parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            if dialog.converted_path:
+                self.status_label.setStyleSheet("color: #1b8a36; font-size: 13px;")
+                self.status_label.setText(
+                    f"Arquivo convertido com sucesso:\n{dialog.converted_path}"
+                )
+            return dialog.converted_path
+        return None
+
+    def prompt_export(self, markdown_path: Path) -> Path | None:
+        """Prompt user with export dialog to choose format and destination folder."""
+        dialog = ExportDialog(markdown_path=markdown_path, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            if dialog.exported_path:
+                self.status_label.setStyleSheet("color: #1b8a36; font-size: 13px;")
+                self.status_label.setText(
+                    f"Arquivo exportado com sucesso para:\n{dialog.exported_path}"
+                )
+            return dialog.exported_path
+        return None
 
     def start_translation(self, pdf_path: Path) -> None:
         if self.current_worker and self.current_worker.isRunning():
@@ -238,6 +534,9 @@ class MainWindow(QMainWindow):
         self.status_label.setStyleSheet("color: #1b8a36; font-size: 13px;")
         self.status_label.setText(f"Tradução salva com sucesso em:\n{output_path}")
         self.current_worker = None
+
+        if self.auto_prompt_export:
+            self.prompt_export(output_path)
 
     def _on_failed(self, error_message: str) -> None:
         logger.error("Translation error: %s", error_message)

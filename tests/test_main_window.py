@@ -122,7 +122,7 @@ def test_main_window_successful_flow(qtbot, tmp_path: Path):
             translator=StubTranslator(),
         )
 
-    window = MainWindow(worker_factory=make_worker)
+    window = MainWindow(worker_factory=make_worker, auto_prompt_export=False)
     qtbot.addWidget(window)
 
     window.start_translation(dummy_pdf)
@@ -141,10 +141,66 @@ def test_main_window_error_flow(qtbot, tmp_path: Path):
             source_path=tmp_path / "non_existent.pdf",
         )
 
-    window = MainWindow(worker_factory=make_failing_worker)
+    window = MainWindow(worker_factory=make_failing_worker, auto_prompt_export=False)
     qtbot.addWidget(window)
 
     window.start_translation(tmp_path / "non_existent.pdf")
     qtbot.waitUntil(lambda: window.drop_area.isEnabled(), timeout=5000)
 
     assert "Erro na tradução" in window.status_label.text()
+
+
+def test_main_window_menu_and_actions(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    menu_bar = window.menuBar()
+    actions = menu_bar.actions()
+    assert len(actions) > 0
+    file_menu = actions[0].menu()
+    assert file_menu is not None
+    file_actions = [a.text() for a in file_menu.actions()]
+    assert any("Converter" in t for t in file_actions)
+    assert any("Sair" in t for t in file_actions)
+
+
+def test_export_dialog_flow(qtbot, tmp_path: Path):
+    from tradutor_pdf.ui.main_window import ExportDialog
+
+    md_file = tmp_path / "doc.pt-BR.md"
+    md_file.write_text("# Teste de Exportação\n\nConteúdo.", encoding="utf-8")
+
+    out_folder = tmp_path / "export_dest"
+    dialog = ExportDialog(markdown_path=md_file, default_dir=out_folder)
+    qtbot.addWidget(dialog)
+
+    # Select EPUB
+    dialog.rb_epub.setChecked(True)
+    dialog.dest_edit.setText(str(out_folder))
+
+    dialog._do_export()
+
+    assert dialog.exported_path is not None
+    assert dialog.exported_path.is_file()
+    assert dialog.exported_path.suffix == ".epub"
+
+
+def test_conversion_dialog_flow(qtbot, tmp_path: Path):
+    from tradutor_pdf.ui.main_window import ConversionDialog
+
+    md_file = tmp_path / "doc.md"
+    md_file.write_text("# Teste de Conversão\n\nTexto.", encoding="utf-8")
+
+    out_folder = tmp_path / "convert_dest"
+    dialog = ConversionDialog(default_dir=out_folder)
+    qtbot.addWidget(dialog)
+
+    dialog.src_edit.setText(str(md_file))
+    dialog.combo_format.setCurrentText("PDF (.pdf)")
+    dialog.dest_edit.setText(str(out_folder))
+
+    dialog._do_convert()
+
+    assert dialog.converted_path is not None
+    assert dialog.converted_path.is_file()
+    assert dialog.converted_path.suffix == ".pdf"

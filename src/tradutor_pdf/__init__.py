@@ -202,9 +202,44 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Ignora qualquer checkpoint existente e reinicia a tradução do zero.",
     )
+    parser.add_argument(
+        "--convert",
+        type=Path,
+        metavar="ARQUIVO",
+        help="Converte um documento entre PDF, MD e EPUB sem executar tradução.",
+    )
+    parser.add_argument(
+        "--to",
+        type=str,
+        metavar="FORMATO",
+        help="Formato de destino para conversão (md, pdf, epub).",
+    )
 
     args = parser.parse_args(argv)
     log = setup_logging()
+
+    if args.convert:
+        if not args.to:
+            print(
+                "[ERRO] É necessário especificar o formato de destino com --to (ex.: --to md, --to pdf, --to epub)",
+                file=sys.stderr,
+            )
+            return 1
+        from tradutor_pdf.export.converter import DocumentConverter
+
+        try:
+            converter = DocumentConverter()
+            out_file = converter.convert(
+                input_path=args.convert,
+                target_format=args.to,
+                destination=args.output,
+            )
+            print(f"[OK] Arquivo convertido com sucesso para: {out_file}")
+            return 0
+        except Exception as exc:
+            log.exception("Falha na conversão de formato")
+            print(f"[ERRO] Falha na conversão: {exc}", file=sys.stderr)
+            return 1
 
     if args.cli:
         log.info("Executando tradução em modo CLI para %s", args.cli)
