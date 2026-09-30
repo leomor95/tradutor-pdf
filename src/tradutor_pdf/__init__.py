@@ -19,7 +19,13 @@ from tradutor_pdf.assembly.markdown import (
 from tradutor_pdf.config import Settings, load_settings
 from tradutor_pdf.extraction.docling_extractor import DoclingExtractor
 from tradutor_pdf.logging_setup import setup_logging, timed_stage
-from tradutor_pdf.pipeline import Assembler, Extractor, Segmenter, Translator
+from tradutor_pdf.pipeline import (
+    Assembler,
+    Chunk,
+    Extractor,
+    Segmenter,
+    Translator,
+)
 from tradutor_pdf.segmentation.semantic import SemanticSegmenter
 from tradutor_pdf.translation.translator import OllamaTranslator
 
@@ -62,13 +68,21 @@ def run_cli(
     print(f"[INFO] Documento dividido em {total_chunks} trechos para tradução.")
 
     with timed_stage("Tradução"):
+        prev_chunk: Chunk | None = None
         for idx, chunk in enumerate(chunks):
             page_info = f"pág. {chunk.page_start}"
             if chunk.page_start != chunk.page_end:
                 page_info = f"págs. {chunk.page_start}-{chunk.page_end}"
 
             print(f"[INFO] Traduzindo trecho {idx + 1}/{total_chunks} ({page_info})...")
-            current_translator.translate(chunk)
+            prev_context = (
+                (prev_chunk.original_text, prev_chunk.translated_text)
+                if prev_chunk and prev_chunk.translated_text
+                else None
+            )
+            current_translator.translate(chunk, previous_context=prev_context)
+            if chunk.status == "translated":
+                prev_chunk = chunk
 
     dest = output_path or get_default_output_path(source)
     with timed_stage("Montagem"):

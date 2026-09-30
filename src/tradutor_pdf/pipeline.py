@@ -90,7 +90,7 @@ class Translator(Protocol):
     def translate(
         self,
         chunk: Chunk,
-        previous_context: str | None = None,
+        previous_context: str | tuple[str, str] | None = None,
     ) -> str:
         """Translate chunk content to target language, returning translated text."""
         ...

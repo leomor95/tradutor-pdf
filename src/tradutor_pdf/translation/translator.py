@@ -53,6 +53,13 @@ class OllamaTranslator(Translator):
         self.target_language = target_language
         self.temperature = temperature
         self.glossary = glossary if glossary is not None else load_glossary()
+        self._last_original: str | None = None
+        self._last_translation: str | None = None
+
+    def reset_context(self) -> None:
+        """Reset accumulated previous context."""
+        self._last_original = None
+        self._last_translation = None
 
     def translate(
         self,
@@ -77,6 +84,9 @@ class OllamaTranslator(Translator):
             prev_orig, prev_trans = previous_context
         elif isinstance(previous_context, str):
             prev_trans = previous_context
+        elif previous_context is None and self._last_translation:
+            prev_orig = self._last_original
+            prev_trans = self._last_translation
 
         # Filter glossary terms that actually appear in this chunk
         app_preserve, app_trans = find_applicable_terms(
@@ -119,6 +129,8 @@ class OllamaTranslator(Translator):
             )
             chunk.translated_text = corrected
             chunk.status = "translated"
+            self._last_original = chunk.original_text
+            self._last_translation = corrected
             return corrected
         except Exception as exc:
             chunk.status = "error"

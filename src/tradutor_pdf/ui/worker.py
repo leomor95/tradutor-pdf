@@ -11,7 +11,7 @@ from tradutor_pdf.assembly.markdown import (
 )
 from tradutor_pdf.config import Settings, load_settings
 from tradutor_pdf.extraction.docling_extractor import DoclingExtractor
-from tradutor_pdf.pipeline import Assembler, Extractor, Segmenter, Translator
+from tradutor_pdf.pipeline import Assembler, Chunk, Extractor, Segmenter, Translator
 from tradutor_pdf.segmentation.semantic import SemanticSegmenter
 from tradutor_pdf.translation.translator import OllamaTranslator
 
@@ -80,6 +80,7 @@ class TranslationWorker(QThread):
 
             self.progress.emit(0, total_chunks)
 
+            prev_chunk: Chunk | None = None
             for idx, chunk in enumerate(chunks):
                 if self.isInterruptionRequested():
                     logger.info("Pipeline cancelled by user.")
@@ -92,7 +93,14 @@ class TranslationWorker(QThread):
                 msg = f"Traduzindo trecho {idx + 1} de {total_chunks} ({page_info})..."
                 self.status_changed.emit(msg)
 
-                self.translator.translate(chunk)
+                prev_context = (
+                    (prev_chunk.original_text, prev_chunk.translated_text)
+                    if prev_chunk and prev_chunk.translated_text
+                    else None
+                )
+                self.translator.translate(chunk, previous_context=prev_context)
+                if chunk.status == "translated":
+                    prev_chunk = chunk
                 self.progress.emit(idx + 1, total_chunks)
 
             if self.isInterruptionRequested():

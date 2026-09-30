@@ -108,3 +108,54 @@ def test_translate_with_glossary_filtering_and_correction(fake_llm):
     assert "aprendizado de máquina" in res
     assert "esteira" not in res
     assert "machine learning" not in res
+
+
+def test_translate_chains_context_automatically(fake_llm):
+    fake_llm.set_response("Primeiro trecho traduzido.")
+    translator = OllamaTranslator(client=fake_llm)
+
+    chunk1 = Chunk(id="c1", original_text="First chunk original text.")
+    translator.translate(chunk1)
+
+    fake_llm.set_response("Segundo trecho traduzido.")
+    chunk2 = Chunk(id="c2", original_text="Second chunk original text.")
+    translator.translate(chunk2)
+
+    assert len(fake_llm.calls) == 2
+    second_prompt = fake_llm.calls[1]["prompt"]
+    assert "### Previous Context" in second_prompt
+    assert "First chunk original text." in second_prompt
+    assert "Primeiro trecho traduzido." in second_prompt
+
+
+def test_translate_explicit_context_overrides_stored(fake_llm):
+    fake_llm.set_response("Resposta")
+    translator = OllamaTranslator(client=fake_llm)
+
+    chunk = Chunk(id="c1", original_text="Current text.")
+    translator.translate(
+        chunk,
+        previous_context=("Explicit original text.", "Texto original explícito."),
+    )
+
+    prompt = fake_llm.calls[0]["prompt"]
+    assert "### Previous Context" in prompt
+    assert "Explicit original text." in prompt
+    assert "Texto original explícito." in prompt
+
+
+def test_translate_reset_context(fake_llm):
+    fake_llm.set_response("Primeiro trecho.")
+    translator = OllamaTranslator(client=fake_llm)
+
+    chunk1 = Chunk(id="c1", original_text="First chunk.")
+    translator.translate(chunk1)
+
+    translator.reset_context()
+
+    fake_llm.set_response("Segundo trecho.")
+    chunk2 = Chunk(id="c2", original_text="Second chunk.")
+    translator.translate(chunk2)
+
+    second_prompt = fake_llm.calls[1]["prompt"]
+    assert "### Previous Context" not in second_prompt

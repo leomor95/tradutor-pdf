@@ -32,21 +32,21 @@ def build_translation_prompt(
     sections: list[str] = []
 
     # 1. Previous context for terminology consistency
-    if previous_original and previous_translation:
-        prev_orig_snippet = previous_original.strip()
-        prev_trans_snippet = previous_translation.strip()
-        # Truncate if too long (e.g. last ~300 chars or lines)
-        if len(prev_orig_snippet) > 400:
-            prev_orig_snippet = "..." + prev_orig_snippet[-400:]
-        if len(prev_trans_snippet) > 400:
-            prev_trans_snippet = "..." + prev_trans_snippet[-400:]
-
-        context_block = (
-            "### Previous Context (for continuity and style only; do NOT re-translate):\n"
-            f'Original:\n"""\n{prev_orig_snippet}\n"""\n\n'
-            f'Translated ({target_language}):\n"""\n{prev_trans_snippet}\n"""'
-        )
-        sections.append(context_block)
+    if previous_original or previous_translation:
+        context_lines = [
+            "### Previous Context (for continuity and style only; do NOT re-translate):"
+        ]
+        if previous_original:
+            orig = previous_original.strip()
+            if len(orig) > 400:
+                orig = "..." + orig[-400:]
+            context_lines.append(f'Original:\n"""\n{orig}\n"""')
+        if previous_translation:
+            trans = previous_translation.strip()
+            if len(trans) > 400:
+                trans = "..." + trans[-400:]
+            context_lines.append(f'Translated ({target_language}):\n"""\n{trans}\n"""')
+        sections.append("\n\n".join(context_lines))
 
     # 2. Glossary terms applicable to this chunk
     glossary_lines: list[str] = []
