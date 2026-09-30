@@ -7,7 +7,9 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "docling>=2.131.0",
     "httpx>=0.28.1",
+    "pyside6>=6.11.2",
     "pyyaml>=6.0.3",
 ]
 
@@ -21,6 +23,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-qt>=4.5.0",
     "ruff>=0.16.9",
 ]
 
