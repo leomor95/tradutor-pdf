@@ -172,3 +172,59 @@ def test_assemble_complex_table_html(tmp_path: Path):
     assembler.assemble(chunks, out_file)
     text = out_file.read_text(encoding="utf-8")
     assert html_table in text
+
+
+def test_incremental_assembly(tmp_path: Path):
+    from tradutor_pdf.pipeline import Block, BlockType
+
+    assembler = MarkdownAssembler()
+    out_file = tmp_path / "incremental" / "output.pt-BR.md"
+
+    # Initialize file
+    assembler.init_incremental(out_file, clear=True)
+    assert out_file.is_file()
+    assert out_file.read_text(encoding="utf-8") == ""
+
+    # Append first chunk
+    c1 = Chunk(
+        id="c1",
+        original_text="# Title",
+        translated_text="# Título Principal",
+        status="translated",
+    )
+    assembler.append_chunk(c1, out_file)
+    assert out_file.read_text(encoding="utf-8") == "# Título Principal\n"
+
+    # Append second chunk
+    c2 = Chunk(
+        id="c2",
+        original_text="First paragraph.",
+        translated_text="Primeiro parágrafo traduzido.",
+        status="translated",
+    )
+    assembler.append_chunk(c2, out_file)
+    expected = "# Título Principal\n\nPrimeiro parágrafo traduzido.\n"
+    assert out_file.read_text(encoding="utf-8") == expected
+
+    # Append third chunk with image asset
+    src_img = tmp_path / "dummy.png"
+    src_img.write_bytes(b"\x89PNG dummy image")
+    c3 = Chunk(
+        id="c3",
+        blocks=[
+            Block(
+                id="b_img",
+                type=BlockType.IMAGE,
+                content="assets/dummy.png",
+                page=1,
+                translatable=False,
+                metadata={"alt": "Diagram", "image_path": str(src_img)},
+            )
+        ],
+        status="skipped",
+    )
+    assembler.append_chunk(c3, out_file)
+
+    text = out_file.read_text(encoding="utf-8")
+    assert "![Diagram](assets/dummy.png)" in text
+    assert (tmp_path / "incremental" / "assets" / "dummy.png").is_file()
