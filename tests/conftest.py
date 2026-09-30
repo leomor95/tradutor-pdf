@@ -1,9 +1,10 @@
-from __future__ import annotations
-
+import os
 from collections.abc import Callable
 from typing import Any
 
 import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 class FakeOllamaClient:
