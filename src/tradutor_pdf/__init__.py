@@ -20,7 +20,7 @@ from tradutor_pdf.config import Settings, load_settings
 from tradutor_pdf.extraction.docling_extractor import DoclingExtractor
 from tradutor_pdf.logging_setup import setup_logging, timed_stage
 from tradutor_pdf.pipeline import Assembler, Extractor, Segmenter, Translator
-from tradutor_pdf.segmentation.naive import NaiveSegmenter
+from tradutor_pdf.segmentation.semantic import SemanticSegmenter
 from tradutor_pdf.translation.translator import OllamaTranslator
 
 logger = logging.getLogger("tradutor_pdf")
@@ -42,7 +42,7 @@ def run_cli(
 
     current_settings = settings or load_settings()
     current_extractor = extractor or DoclingExtractor(do_ocr=False)
-    current_segmenter = segmenter or NaiveSegmenter()
+    current_segmenter = segmenter or SemanticSegmenter()
     current_translator = translator or OllamaTranslator(
         model=current_settings.translation.model,
         target_language=current_settings.translation.target_language,

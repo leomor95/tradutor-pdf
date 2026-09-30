@@ -6,7 +6,7 @@ from tradutor_pdf.assembly.markdown import (
     get_default_output_path,
 )
 from tradutor_pdf.extraction.docling_extractor import DoclingExtractor
-from tradutor_pdf.segmentation.naive import NaiveSegmenter
+from tradutor_pdf.segmentation.semantic import SemanticSegmenter
 from tradutor_pdf.translation.translator import OllamaTranslator
 from tradutor_pdf.ui.worker import TranslationWorker
 
@@ -30,7 +30,7 @@ def test_full_pipeline_cli_integration(fake_llm, tmp_path: Path):
         pdf_path=fixture_pdf,
         output_path=output_md,
         extractor=DoclingExtractor(do_ocr=False),
-        segmenter=NaiveSegmenter(),
+        segmenter=SemanticSegmenter(),
         translator=translator,
         assembler=MarkdownAssembler(),
     )
@@ -56,7 +56,7 @@ def test_full_pipeline_worker_integration(fake_llm, qtbot, tmp_path: Path):
     worker = TranslationWorker(
         source_path=fixture_pdf,
         extractor=DoclingExtractor(do_ocr=False),
-        segmenter=NaiveSegmenter(),
+        segmenter=SemanticSegmenter(),
         translator=translator,
         assembler=MarkdownAssembler(),
     )
