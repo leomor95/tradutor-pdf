@@ -65,6 +65,13 @@ def test_technical_fixture_end_to_end_fake_llm(tmp_path: Path, fake_llm) -> None
 @pytest.mark.slow
 def test_quality_real_llm_technical_terms(tmp_path: Path) -> None:
     """Slow integration test (CA06): verify 100% preservation of technical glossary terms with real LLM."""
+    import subprocess
+
+    from tradutor_pdf.config import find_project_root
+
+    root = find_project_root()
+    subprocess.run([str(root / "scripts" / "run.sh"), "--check"], check=False)
+
     output_md = tmp_path / "technical_en.pt-BR.md"
 
     result_path = run_cli(
