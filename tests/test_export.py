@@ -136,3 +136,91 @@ Os componentes principais do sistema incluem:
     # Validate with epubcheck
     is_valid, report = validate_epub(out_file)
     assert is_valid, f"EPUB validation failed: {report}"
+
+
+def test_pdf_exporter_protocol():
+    from tradutor_pdf.export.pdf import PdfExporter
+
+    exporter = PdfExporter()
+    assert isinstance(exporter, Exporter)
+
+
+def test_pdf_exporter_generates_pdf(tmp_path: Path):
+    import base64
+
+    from tradutor_pdf.export.pdf import PdfExporter
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    assets_dir = src_dir / "assets"
+    assets_dir.mkdir()
+
+    # Create dummy 1x1 png image
+    png_bytes = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
+    (assets_dir / "chart.png").write_bytes(png_bytes)
+
+    md_content = """# Relatório Técnico
+
+Documento demonstrativo de exportação PDF via Typst.
+
+## Trecho de Código
+
+```python
+def fibonacci(n: int) -> int:
+    if n <= 1:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+```
+
+## Tabela de Dados
+
+| Chave | Valor | Observação |
+|---|---|---|
+| Timeout | 30s | Conexão externa |
+| Retries | 3 | Tentativas máximas |
+
+## Ilustração
+
+![Gráfico de Desempenho](assets/chart.png)
+"""
+    md_file = src_dir / "relatorio.pt-BR.md"
+    md_file.write_text(md_content, encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    exporter = PdfExporter()
+    out_pdf = exporter.export(md_file, destination_dir=out_dir)
+
+    assert out_pdf == out_dir / "relatorio.pt-BR.pdf"
+    assert out_pdf.is_file()
+    assert out_pdf.stat().st_size > 0
+
+    # Verify PDF magic header
+    pdf_bytes = out_pdf.read_bytes()
+    assert pdf_bytes.startswith(b"%PDF-")
+
+
+def test_pdf_exporter_custom_output_filename(tmp_path: Path):
+    from tradutor_pdf.export.pdf import PdfExporter
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    md_file = src_dir / "doc.md"
+    md_file.write_text("# Título\n\nTexto simples.", encoding="utf-8")
+
+    target_pdf = tmp_path / "custom_folder" / "custom_name.pdf"
+    exporter = PdfExporter()
+    res_path = exporter.export(md_file, destination_dir=target_pdf)
+
+    assert res_path == target_pdf
+    assert target_pdf.is_file()
+    assert target_pdf.read_bytes().startswith(b"%PDF-")
+
+
+def test_pdf_exporter_missing_file_raises(tmp_path: Path):
+    from tradutor_pdf.export.pdf import PdfExporter
+
+    exporter = PdfExporter()
+    with pytest.raises(FileNotFoundError):
+        exporter.export(tmp_path / "missing.md", destination_dir=tmp_path / "out")
