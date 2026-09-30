@@ -379,6 +379,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Tradutor de PDF")
         self.resize(640, 420)
         self.current_worker: TranslationWorker | None = None
+        self._last_pdf_path: Path | None = None
 
         self._current_stage: str = ""
         self._current_page: int = 0
@@ -436,6 +437,24 @@ class MainWindow(QMainWindow):
         )
         status_layout.addWidget(self.eta_label)
         root_layout.addLayout(status_layout)
+
+        # Action controls layout (Cancel / Resume)
+        controls_layout = QHBoxLayout()
+        controls_layout.addStretch()
+        self.btn_cancel = QPushButton("Cancelar")
+        self.btn_cancel.setStyleSheet("padding: 5px 14px; font-size: 13px;")
+        self.btn_cancel.setVisible(False)
+        self.btn_cancel.clicked.connect(self.cancel_translation)
+        controls_layout.addWidget(self.btn_cancel)
+
+        self.btn_resume = QPushButton("Retomar tradução")
+        self.btn_resume.setStyleSheet(
+            "padding: 5px 14px; font-size: 13px; font-weight: bold; background-color: #2b7de9; color: white; border-radius: 4px;"
+        )
+        self.btn_resume.setVisible(False)
+        self.btn_resume.clicked.connect(self.resume_translation)
+        controls_layout.addWidget(self.btn_resume)
+        root_layout.addLayout(controls_layout)
 
     def _setup_menu(self) -> None:
         menu_bar = self.menuBar()
@@ -505,6 +524,7 @@ class MainWindow(QMainWindow):
                     checkpoint_store.clear(pdf_path)
 
         logger.info("Initiating translation for %s", pdf_path)
+        self._last_pdf_path = pdf_path
         self._current_stage = "Iniciando"
         self._current_page = 0
         self._total_pages = 0
@@ -512,6 +532,9 @@ class MainWindow(QMainWindow):
         self._total_chunks = 0
 
         self.drop_area.setEnabled(False)
+        self.btn_resume.setVisible(False)
+        self.btn_cancel.setVisible(True)
+        self.btn_cancel.setEnabled(True)
         self.eta_label.setText("")
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("Iniciando…")
@@ -535,10 +558,37 @@ class MainWindow(QMainWindow):
             self.current_worker.page_progress.connect(self._on_page_progress)
         if hasattr(self.current_worker, "eta_updated"):
             self.current_worker.eta_updated.connect(self._on_eta_updated)
+        if hasattr(self.current_worker, "cancelled"):
+            self.current_worker.cancelled.connect(self._on_cancelled)
         self.current_worker.finished.connect(self._on_finished)
         self.current_worker.failed.connect(self._on_failed)
 
         self.current_worker.start()
+
+    def cancel_translation(self) -> None:
+        """Request interruption of the current translation worker."""
+        if self.current_worker and self.current_worker.isRunning():
+            self.btn_cancel.setEnabled(False)
+            self.status_label.setText("Cancelando tradução...")
+            self.current_worker.requestInterruption()
+
+    def resume_translation(self) -> None:
+        """Resume translation of the last opened PDF from checkpoint."""
+        if self._last_pdf_path and self._last_pdf_path.is_file():
+            self.start_translation(self._last_pdf_path)
+
+    def _on_cancelled(self) -> None:
+        logger.info("Translation cancelled by user")
+        self.drop_area.setEnabled(True)
+        self.eta_label.setText("")
+        self.btn_cancel.setVisible(False)
+        self.btn_resume.setVisible(True)
+        self.btn_resume.setEnabled(True)
+        self.status_label.setStyleSheet("color: #e65100; font-size: 13px;")
+        self.status_label.setText(
+            "Tradução cancelada. Clique em 'Retomar' para continuar de onde parou."
+        )
+        self.current_worker = None
 
     def _on_eta_updated(self, seconds: float) -> None:
         if seconds > 0:
@@ -596,6 +646,8 @@ class MainWindow(QMainWindow):
     def _on_finished(self, output_path: Path) -> None:
         logger.info("Translation finished: %s", output_path)
         self.drop_area.setEnabled(True)
+        self.btn_cancel.setVisible(False)
+        self.btn_resume.setVisible(False)
         self.eta_label.setText("")
         self.progress_bar.setValue(100)
         self.progress_bar.setFormat("100% Concluído")
@@ -609,6 +661,10 @@ class MainWindow(QMainWindow):
     def _on_failed(self, error_message: str) -> None:
         logger.error("Translation error: %s", error_message)
         self.drop_area.setEnabled(True)
+        self.btn_cancel.setVisible(False)
+        if self._last_pdf_path and self._last_pdf_path.is_file():
+            self.btn_resume.setVisible(True)
+            self.btn_resume.setEnabled(True)
         self.eta_label.setText("")
         self.status_label.setStyleSheet("color: #d32f2f; font-size: 13px;")
         self.status_label.setText(f"Erro na tradução: {error_message}")

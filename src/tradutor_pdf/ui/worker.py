@@ -38,6 +38,7 @@ class TranslationWorker(QThread):
     status_changed = Signal(str)  # Status description in pt-BR
     finished = Signal(Path)  # Path to generated Markdown file
     failed = Signal(str)  # Failure message
+    cancelled = Signal()  # Cancelled by user
 
     def __init__(
         self,
@@ -136,6 +137,7 @@ class TranslationWorker(QThread):
                 blocks = self.extractor.extract(self.source_path)
 
             if self.isInterruptionRequested():
+                self.cancelled.emit()
                 return
 
             self.stage_changed.emit("Segmentando")
@@ -187,6 +189,7 @@ class TranslationWorker(QThread):
             for idx, chunk in enumerate(chunks):
                 if self.isInterruptionRequested():
                     logger.info("Pipeline cancelled by user.")
+                    self.cancelled.emit()
                     return
 
                 page_info = f"página {chunk.page_start}"
@@ -233,6 +236,7 @@ class TranslationWorker(QThread):
                 self.progress.emit(idx + 1, total_chunks)
 
             if self.isInterruptionRequested():
+                self.cancelled.emit()
                 return
 
             self.eta_updated.emit(0.0)

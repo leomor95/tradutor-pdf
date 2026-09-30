@@ -204,3 +204,61 @@ def test_conversion_dialog_flow(qtbot, tmp_path: Path):
     assert dialog.converted_path is not None
     assert dialog.converted_path.is_file()
     assert dialog.converted_path.suffix == ".pdf"
+
+
+def test_main_window_cancel_and_resume(qtbot, tmp_path: Path):
+    import time
+
+    dummy_pdf = tmp_path / "long_doc.pdf"
+    dummy_pdf.write_bytes(b"%PDF-1.4...")
+    output_md = tmp_path / "long_doc.pt-BR.md"
+
+    class SlowTranslator(Translator):
+        def translate(self, chunk, previous_context=None):
+            time.sleep(0.1)
+            chunk.translated_text = f"PT: {chunk.original_text}"
+            chunk.status = "translated"
+            return chunk.translated_text
+
+    class MultiBlockExtractor(Extractor):
+        def extract(self, source_path, pages=None):
+            return [
+                Block(id=f"b{i}", type=BlockType.PARAGRAPH, content=f"P {i}", page=i)
+                for i in range(1, 10)
+            ]
+
+    def make_worker(path: Path) -> TranslationWorker:
+        return TranslationWorker(
+            source_path=path,
+            output_path=output_md,
+            extractor=MultiBlockExtractor(),
+            translator=SlowTranslator(),
+        )
+
+    window = MainWindow(worker_factory=make_worker, auto_prompt_export=False)
+    qtbot.addWidget(window)
+    window.show()
+
+    window.start_translation(dummy_pdf)
+    assert not window.btn_cancel.isHidden()
+    assert window.btn_resume.isHidden()
+
+    # Cancel while in progress
+    window.cancel_translation()
+    qtbot.waitUntil(lambda: not window.btn_resume.isHidden(), timeout=5000)
+
+    assert window.btn_cancel.isHidden()
+    assert not window.btn_resume.isHidden()
+    assert "cancelada" in window.status_label.text().lower()
+    assert window.drop_area.isEnabled()
+
+    # Resume
+    window.resume_translation()
+    assert not window.btn_cancel.isHidden()
+    assert window.btn_resume.isHidden()
+
+    qtbot.waitUntil(lambda: window.progress_bar.value() == 100, timeout=10000)
+    assert window.btn_cancel.isHidden()
+    assert window.btn_resume.isHidden()
+    if window.current_worker:
+        window.current_worker.wait(5000)
