@@ -375,10 +375,15 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.worker_factory = worker_factory
         self.auto_prompt_export = auto_prompt_export
-        self.current_worker: TranslationWorker | None = None
-
         self.setWindowTitle("Tradutor de PDF")
         self.resize(640, 420)
+        self.current_worker: TranslationWorker | None = None
+
+        self._current_stage: str = ""
+        self._current_page: int = 0
+        self._total_pages: int = 0
+        self._done_chunks: int = 0
+        self._total_chunks: int = 0
 
         # Menu bar
         self._setup_menu()
@@ -493,8 +498,15 @@ class MainWindow(QMainWindow):
                     checkpoint_store.clear(pdf_path)
 
         logger.info("Initiating translation for %s", pdf_path)
+        self._current_stage = "Iniciando"
+        self._current_page = 0
+        self._total_pages = 0
+        self._done_chunks = 0
+        self._total_chunks = 0
+
         self.drop_area.setEnabled(False)
         self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("Iniciando…")
         self.status_label.setStyleSheet("color: #0b63ce; font-size: 13px;")
         self.status_label.setText(f"Iniciando tradução de {pdf_path.name}...")
 
@@ -509,19 +521,58 @@ class MainWindow(QMainWindow):
 
         self.current_worker.progress.connect(self._on_progress)
         self.current_worker.status_changed.connect(self._on_status_changed)
+        if hasattr(self.current_worker, "stage_changed"):
+            self.current_worker.stage_changed.connect(self._on_stage_changed)
+        if hasattr(self.current_worker, "page_progress"):
+            self.current_worker.page_progress.connect(self._on_page_progress)
         self.current_worker.finished.connect(self._on_finished)
         self.current_worker.failed.connect(self._on_failed)
 
         self.current_worker.start()
 
+    def _on_stage_changed(self, stage: str) -> None:
+        self._current_stage = stage
+        self._update_progress_display()
+
+    def _on_page_progress(
+        self, current_page: int, total_pages: int, stage: str
+    ) -> None:
+        self._current_page = current_page
+        self._total_pages = total_pages
+        self._current_stage = stage
+        self._update_progress_display()
+
     def _on_progress(self, done: int, total: int) -> None:
-        if total > 0:
-            pct = int((done / total) * 100)
+        self._done_chunks = done
+        self._total_chunks = total
+        self._update_progress_display()
+
+    def _update_progress_display(self) -> None:
+        stage = self._current_stage or "Processando"
+        page_info = (
+            f"Página {self._current_page} de {self._total_pages}"
+            if self._total_pages > 0 and self._current_page > 0
+            else ""
+        )
+
+        if stage == "Traduzindo" and self._total_chunks > 0:
+            pct = int((self._done_chunks / self._total_chunks) * 100)
             self.progress_bar.setValue(pct)
-            self.progress_bar.setFormat(f"{pct}% ({done}/{total})")
+            if page_info:
+                self.progress_bar.setFormat(f"{page_info} — {stage} ({pct}%)")
+            else:
+                self.progress_bar.setFormat(f"{stage} ({pct}%)")
+        elif self._total_pages > 0 and self._current_page > 0:
+            pct = int((self._current_page / self._total_pages) * 100)
+            self.progress_bar.setValue(pct)
+            self.progress_bar.setFormat(f"{page_info} — {stage}")
+        elif self._total_chunks > 0:
+            pct = int((self._done_chunks / self._total_chunks) * 100)
+            self.progress_bar.setValue(pct)
+            self.progress_bar.setFormat(f"{stage} ({pct}%)")
         else:
             self.progress_bar.setValue(0)
-            self.progress_bar.setFormat("%p%")
+            self.progress_bar.setFormat(f"{stage}…")
 
     def _on_status_changed(self, message: str) -> None:
         self.status_label.setText(message)

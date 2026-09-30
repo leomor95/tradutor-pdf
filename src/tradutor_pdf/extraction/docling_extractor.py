@@ -4,7 +4,7 @@ import contextlib
 import gc
 import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -316,6 +316,7 @@ class DoclingExtractor(Extractor):
         pages: tuple[int, int],
         assets_dir: Path | None = None,
         start_block_idx: int = 0,
+        on_page_progress: Callable[[int, int, str], None] | None = None,
     ) -> list[Block]:
         """Extract structural blocks from a specific page range [start_page, end_page]."""
         source = Path(source_path)
@@ -350,6 +351,13 @@ class DoclingExtractor(Extractor):
         blocks: list[Block] = []
         cur_idx = start_block_idx
         for sub_start, sub_end, is_ocr in segments:
+            stage_name = "OCR" if is_ocr else "Extraindo"
+            if on_page_progress is not None:
+                try:
+                    on_page_progress(sub_start, sub_end, stage_name)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("on_page_progress callback error: %s", exc)
+
             sub_blocks = self._extract_sub_range(
                 source=source,
                 sub_pages=(sub_start, sub_end),
@@ -375,6 +383,7 @@ class DoclingExtractor(Extractor):
         source_path: Path,
         window_size: int | None = None,
         assets_dir: Path | None = None,
+        on_page_progress: Callable[[int, int, str], None] | None = None,
     ) -> Iterator[tuple[tuple[int, int], list[Block]]]:
         """Yield (page_range, blocks) for each window of pages in the PDF document."""
         source = Path(source_path)
@@ -393,6 +402,7 @@ class DoclingExtractor(Extractor):
                 pages=page_range,
                 assets_dir=assets_dir,
                 start_block_idx=cur_block_idx,
+                on_page_progress=on_page_progress,
             )
             cur_block_idx += len(blocks)
             yield page_range, blocks
@@ -403,6 +413,7 @@ class DoclingExtractor(Extractor):
         pages: tuple[int, int] | None = None,
         assets_dir: Path | None = None,
         window_size: int | None = None,
+        on_page_progress: Callable[[int, int, str], None] | None = None,
     ) -> list[Block]:
         source = Path(source_path)
         if not source.exists():
@@ -414,6 +425,7 @@ class DoclingExtractor(Extractor):
                 pages=pages,
                 assets_dir=assets_dir,
                 start_block_idx=0,
+                on_page_progress=on_page_progress,
             )
 
         eff_window_size = max(1, window_size or self.default_window_size)
@@ -425,6 +437,7 @@ class DoclingExtractor(Extractor):
                 pages=(1, total_pages),
                 assets_dir=assets_dir,
                 start_block_idx=0,
+                on_page_progress=on_page_progress,
             )
 
         logger.info(
@@ -438,6 +451,7 @@ class DoclingExtractor(Extractor):
             source_path=source,
             window_size=eff_window_size,
             assets_dir=assets_dir,
+            on_page_progress=on_page_progress,
         ):
             all_blocks.extend(window_blocks)
 

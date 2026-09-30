@@ -81,3 +81,39 @@ def test_worker_missing_file_fails(qtbot, tmp_path: Path):
 
     assert len(failed_records) == 1
     assert "não encontrado" in failed_records[0]
+
+
+def test_worker_stage_and_page_progress(qtbot, tmp_path: Path):
+    dummy_pdf = tmp_path / "doc.pdf"
+    dummy_pdf.write_bytes(b"%PDF-1.4...")
+    output_md = tmp_path / "out.md"
+
+    blocks = [
+        Block(id="b1", type=BlockType.PARAGRAPH, content="Text page 1", page=1),
+        Block(id="b2", type=BlockType.PARAGRAPH, content="Text page 2", page=2),
+    ]
+
+    worker = TranslationWorker(
+        source_path=dummy_pdf,
+        output_path=output_md,
+        extractor=StubExtractor(blocks),
+        translator=StubTranslator(),
+    )
+
+    stages = []
+    page_events = []
+    worker.stage_changed.connect(stages.append)
+    worker.page_progress.connect(
+        lambda cur, tot, stg: page_events.append((cur, tot, stg))
+    )
+
+    with qtbot.waitSignal(worker.finished, timeout=5000):
+        worker.start()
+
+    assert "Extraindo" in stages
+    assert "Segmentando" in stages
+    assert "Traduzindo" in stages
+    assert "Montando" in stages
+    assert len(page_events) >= 3
+    # Check that stage names are accurately passed with page info
+    assert any(stg == "Traduzindo" for _, _, stg in page_events)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 from pathlib import Path
 
@@ -27,6 +28,10 @@ class TranslationWorker(QThread):
     """Executes the translation pipeline in a background thread with checkpointing and resumption."""
 
     progress = Signal(int, int)  # (done, total)
+    stage_changed = Signal(
+        str
+    )  # "Extraindo" | "OCR" | "Segmentando" | "Traduzindo" | "Montando"
+    page_progress = Signal(int, int, str)  # (current_page, total_pages, stage_name)
     status_changed = Signal(str)  # Status description in pt-BR
     finished = Signal(Path)  # Path to generated Markdown file
     failed = Signal(str)  # Failure message
@@ -97,13 +102,41 @@ class TranslationWorker(QThread):
                 target_language=self.settings.translation.target_language,
             )
 
+            def _on_extraction_page(
+                start_page: int, end_page: int, stage_name: str
+            ) -> None:
+                self.stage_changed.emit(stage_name)
+                self.page_progress.emit(start_page, total_pages, stage_name)
+                if start_page == end_page:
+                    self.status_changed.emit(
+                        f"{stage_name} página {start_page} de {total_pages}..."
+                    )
+                else:
+                    self.status_changed.emit(
+                        f"{stage_name} páginas {start_page}-{end_page} de {total_pages}..."
+                    )
+
+            self.stage_changed.emit("Extraindo")
+            self.page_progress.emit(1, total_pages, "Extraindo")
             self.status_changed.emit("Extraindo texto do documento...")
             logger.info("Starting pipeline for %s", self.source_path)
-            blocks = self.extractor.extract(self.source_path)
+
+            try:
+                sig = inspect.signature(self.extractor.extract)
+                if "on_page_progress" in sig.parameters:
+                    blocks = self.extractor.extract(
+                        self.source_path, on_page_progress=_on_extraction_page
+                    )
+                else:
+                    blocks = self.extractor.extract(self.source_path)
+            except (TypeError, ValueError):
+                blocks = self.extractor.extract(self.source_path)
 
             if self.isInterruptionRequested():
                 return
 
+            self.stage_changed.emit("Segmentando")
+            self.page_progress.emit(1, total_pages, "Segmentando")
             self.status_changed.emit("Segmentando trechos para tradução...")
             max_tokens = self.settings.translation.chunk_max_tokens
             chunks = self.segmenter.segment(blocks, max_tokens=max_tokens)
@@ -145,6 +178,7 @@ class TranslationWorker(QThread):
 
             self.progress.emit(completed_so_far, total_chunks)
 
+            self.stage_changed.emit("Traduzindo")
             prev_chunk: Chunk | None = None
             for idx, chunk in enumerate(chunks):
                 if self.isInterruptionRequested():
@@ -154,6 +188,8 @@ class TranslationWorker(QThread):
                 page_info = f"página {chunk.page_start}"
                 if chunk.page_start != chunk.page_end:
                     page_info = f"páginas {chunk.page_start}-{chunk.page_end}"
+
+                self.page_progress.emit(chunk.page_start, total_pages, "Traduzindo")
 
                 # Skip if already translated in checkpoint
                 if self.checkpoint_store.is_chunk_completed(self.source_path, chunk.id):
@@ -186,6 +222,8 @@ class TranslationWorker(QThread):
             if self.isInterruptionRequested():
                 return
 
+            self.stage_changed.emit("Montando")
+            self.page_progress.emit(total_pages, total_pages, "Montando")
             self.status_changed.emit("Finalizando montagem do Markdown...")
             final_path = self.assembler.assemble(chunks, dest)
             self.checkpoint_store.mark_completed(self.source_path)
