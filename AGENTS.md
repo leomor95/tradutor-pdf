@@ -27,6 +27,8 @@ Variáveis de ambiente isoladas (configuradas por `scripts/run.sh`):
 - `XDG_CACHE_HOME=./.cache`
 - `HF_HOME=./.cache/hf`
 - `UV_CACHE_DIR=./.cache/uv`
+- `TMPDIR=./.cache/tmp` (também `TEMP` e `TMP`)
+- `HOME=./.cache` apenas para o processo `ollama serve` (evita `~/.ollama`)
 - `TESSDATA_PREFIX=./bin/tessdata` (se pacote de idioma 'eng' não estiver no sistema)
 
 ---
@@ -80,29 +82,37 @@ uv run ruff format
 ```
 tradutor-pdf/
 ├── AGENTS.md             # Este guia versionado
-├── bin/                  # Binário do Ollama (ignorado pelo git)
+├── README.md             # Visão geral para usuários e desenvolvedores
+├── bin/                  # Ollama, JRE portátil, epubcheck e tessdata (ignorado pelo git)
+├── lib/                  # Bibliotecas do Ollama extraídas pelo setup (ignorado pelo git)
 ├── config/
 │   ├── settings.toml     # Configurações do app (modelo, OCR, diretórios)
-│   └── glossario.yaml    # Termos a preservar e traduções fixas
+│   ├── glossario.yaml    # Termos a preservar e traduções fixas
+│   └── state.json        # Última pasta de destino usada (ignorado pelo git)
 ├── docs/                 # Documentação e sprints (ignorado pelo git)
 ├── logs/                 # Logs rotativos da aplicação e do Ollama
 ├── models/               # Modelos locais do Ollama (ignorado pelo git)
+├── out/                  # Saídas de build/exportação locais (ignorado pelo git)
 ├── scripts/
 │   ├── setup.sh          # Script de instalação idempotente
-│   └── run.sh            # Script de inicialização isolada
+│   ├── run.sh            # Script de inicialização isolada
+│   ├── benchmark.py      # Benchmark de tempo, RAM e VRAM por etapa (relatório em logs/)
+│   ├── audit_isolation.sh # Auditoria de arquivos criados fora do projeto
+│   └── gen_big_pdf.py    # Gera PDF sintético grande (padrão: 1000 páginas)
 ├── src/tradutor_pdf/
 │   ├── extraction/       # Extração e OCR de PDFs
 │   ├── segmentation/     # Divisão semântica em trechos
 │   ├── translation/      # Integração Ollama, prompts e glossário
 │   ├── assembly/         # Montagem e recomposição em Markdown
-│   ├── export/           # Exportadores (PDF/EPUB)
+│   ├── export/           # Exportadores (MD/PDF/EPUB) e conversor de formatos
 │   ├── checkpoint/       # Persistência atômica e retomada
 │   ├── ui/               # Interface gráfica PySide6
 │   ├── config.py         # Leitura e validação de configurações
 │   ├── logging_setup.py  # Configuração de logs e medição de tempo
 │   └── pipeline.py       # Protocols e estruturas de dados
-├── tests/                # Testes unitários e fixtures (conftest.py)
-├── .cache/               # Cache local isolado
+├── tests/                # Testes unitários, testes de UI (tests/ui/) e fixtures (conftest.py)
+│   └── fixtures/         # PDFs de teste gerados de fontes Typst por build_fixtures.py
+├── .cache/               # Cache local isolado, checkpoints e TMPDIR
 ├── .venv/                # Ambiente virtual Python 3.12
 └── pyproject.toml        # Metadados e dependências do projeto
 ```
