@@ -224,3 +224,86 @@ def test_pdf_exporter_missing_file_raises(tmp_path: Path):
     exporter = PdfExporter()
     with pytest.raises(FileNotFoundError):
         exporter.export(tmp_path / "missing.md", destination_dir=tmp_path / "out")
+
+
+def test_conversion_pdf_to_md_with_s2_fixtures(tmp_path: Path):
+    from tradutor_pdf.export.converter import DocumentConverter
+
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    fixture_pdf = fixtures_dir / "headings_lists.pdf"
+    assert fixture_pdf.is_file(), "headings_lists.pdf fixture missing"
+
+    converter = DocumentConverter()
+    out_md = converter.convert(
+        fixture_pdf, target_format="md", destination=tmp_path / "headings_lists.md"
+    )
+
+    assert out_md.is_file()
+    content = out_md.read_text(encoding="utf-8")
+    assert "#" in content
+    assert len(content) > 100
+
+
+def test_conversion_tables_images_pdf_to_md_and_epub(tmp_path: Path):
+    from tradutor_pdf.export.converter import DocumentConverter
+    from tradutor_pdf.export.epub import validate_epub
+
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    fixture_pdf = fixtures_dir / "tables_images.pdf"
+    assert fixture_pdf.is_file(), "tables_images.pdf fixture missing"
+
+    converter = DocumentConverter()
+    # 1. PDF -> MD
+    out_md = converter.convert(
+        fixture_pdf, target_format="md", destination=tmp_path / "tables_images.md"
+    )
+    assert out_md.is_file()
+    md_content = out_md.read_text(encoding="utf-8")
+    assert "|" in md_content or "<table" in md_content
+
+    # Check that assets were extracted
+    assets_dir = out_md.parent / "assets"
+    assert assets_dir.is_dir()
+    image_files = list(assets_dir.glob("*.png"))
+    assert len(image_files) > 0
+
+    # 2. MD -> EPUB
+    out_epub = converter.convert(
+        out_md, target_format="epub", destination=tmp_path / "tables_images.epub"
+    )
+    assert out_epub.is_file()
+    assert out_epub.stat().st_size > 0
+
+    # Validate EPUB with epubcheck
+    is_valid, report = validate_epub(out_epub)
+    assert is_valid, f"Generated EPUB invalid: {report}"
+
+    # 3. EPUB -> MD
+    out_md_from_epub = converter.convert(
+        out_epub, target_format="md", destination=tmp_path / "from_epub.md"
+    )
+    assert out_md_from_epub.is_file()
+    assert len(out_md_from_epub.read_text(encoding="utf-8")) > 50
+
+    # 4. MD -> PDF
+    out_pdf = converter.convert(
+        out_md, target_format="pdf", destination=tmp_path / "tables_images.pdf"
+    )
+    assert out_pdf.is_file()
+    assert out_pdf.read_bytes().startswith(b"%PDF-")
+
+
+def test_conversion_unsupported_format_raises(tmp_path: Path):
+    from tradutor_pdf.export.converter import DocumentConverter
+
+    dummy_file = tmp_path / "test.txt"
+    dummy_file.write_text("Hello", encoding="utf-8")
+
+    converter = DocumentConverter()
+    with pytest.raises(ValueError):
+        converter.convert(dummy_file, target_format="md")
+
+    md_file = tmp_path / "test.md"
+    md_file.write_text("# Hello", encoding="utf-8")
+    with pytest.raises(ValueError):
+        converter.convert(md_file, target_format="docx")
