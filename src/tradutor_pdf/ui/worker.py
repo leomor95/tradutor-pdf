@@ -49,7 +49,11 @@ class TranslationWorker(QThread):
         self.output_path = Path(output_path) if output_path else None
         self.settings = settings or load_settings()
 
-        self.extractor = extractor or DoclingExtractor(do_ocr=False)
+        self.extractor = extractor or DoclingExtractor(
+            do_ocr="auto",
+            ocr_languages=self.settings.ocr.languages,
+            min_text_chars=self.settings.ocr.min_chars,
+        )
         self.segmenter = segmenter or SemanticSegmenter()
         self.translator = translator or OllamaTranslator(
             model=self.settings.translation.model,

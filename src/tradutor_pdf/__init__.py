@@ -54,7 +54,11 @@ def run_cli(
         raise FileNotFoundError(f"Arquivo PDF não encontrado: {source}")
 
     current_settings = settings or load_settings()
-    current_extractor = extractor or DoclingExtractor(do_ocr=False)
+    current_extractor = extractor or DoclingExtractor(
+        do_ocr="auto",
+        ocr_languages=current_settings.ocr.languages,
+        min_text_chars=current_settings.ocr.min_chars,
+    )
     current_segmenter = segmenter or SemanticSegmenter()
     current_translator = translator or OllamaTranslator(
         model=current_settings.translation.model,
@@ -107,7 +111,7 @@ def run_cli(
         target_language=current_settings.translation.target_language,
     )
 
-    with timed_stage("Extração"):
+    with timed_stage("Extração / OCR"):
         blocks = current_extractor.extract(source)
 
     with timed_stage("Segmentação"):
