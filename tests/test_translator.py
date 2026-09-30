@@ -83,3 +83,28 @@ def test_translate_error_handling(fake_llm):
 
     assert chunk.status == "error"
     assert "Connection timed out" in chunk.error_message
+
+
+def test_translate_with_glossary_filtering_and_correction(fake_llm):
+    # LLM outputs "esteira" instead of "pipeline", and untranslated "machine learning"
+    fake_llm.set_response("Nós construímos uma esteira usando machine learning.")
+    translator = OllamaTranslator(client=fake_llm)
+
+    chunk = Chunk(
+        id="c5",
+        original_text="We build a pipeline using machine learning.",
+        token_count=10,
+    )
+
+    res = translator.translate(chunk)
+    # The prompt should contain only the matching terms
+    prompt = fake_llm.calls[0]["prompt"]
+    assert "pipeline" in prompt
+    assert "machine learning" in prompt
+    assert "framework" not in prompt  # not in chunk, so not sent
+
+    # The result should have corrected "esteira" -> "pipeline" and "machine learning" -> "aprendizado de máquina"
+    assert "pipeline" in res
+    assert "aprendizado de máquina" in res
+    assert "esteira" not in res
+    assert "machine learning" not in res
