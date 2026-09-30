@@ -3,6 +3,7 @@
 # Project-local runtime directories (RNF24)
 .venv/
 bin/
+lib/
 models/
 .cache/
 logs/
