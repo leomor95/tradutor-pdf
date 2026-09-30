@@ -1,0 +1,33 @@
+[project]
+name = "tradutor-pdf"
+version = "0.1.0"
+description = "Tradutor de PDF (EN -> pt-BR) com LLM local"
+authors = [
+    { name = "leomor95", email = "leomoraes195@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "pyyaml>=6.0.3",
+]
+
+[project.scripts]
+tradutor-pdf = "tradutor_pdf:main"
+
+[build-system]
+requires = ["uv_build>=0.12.20,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.9",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+addopts = "-m 'not slow'"
+
