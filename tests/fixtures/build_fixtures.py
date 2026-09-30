@@ -91,10 +91,20 @@ def build_mixed_fixture() -> None:
     print(f"  Generated {pdf_file.name} ({pdf_file.stat().st_size} bytes)")
 
 
+def build_book_100p_fixture() -> None:
+    pdf_file = FIXTURES_DIR / "book_100p.pdf"
+    if not pdf_file.is_file():
+        from scripts.gen_big_pdf import generate_synthetic_pdf
+
+        print(f"Generating {pdf_file.name} (100 pages)...")
+        generate_synthetic_pdf(pdf_file, total_pages=100)
+
+
 def build_all_fixtures() -> None:
     build_standard_fixtures()
     build_scanned_fixture()
     build_mixed_fixture()
+    build_book_100p_fixture()
 
 
 if __name__ == "__main__":
